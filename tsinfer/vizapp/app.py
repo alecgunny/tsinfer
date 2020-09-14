@@ -10,8 +10,11 @@ from tsinfer.pipeline.common import StreamingMetric
 def pause_context(f):
     def wrapper(self, *args, **kwargs):
         with self.simulator.pause():
+            self.pause()
             stuff = f(self, *args, **kwargs)
+            self.initialize_data()
         self.warm_up()
+        self.resume()
         return stuff
 
 
@@ -19,18 +22,39 @@ class VizApp:
     def __init__(self, simulator, warm_up_batches=50):
         self.simulator = simulator
 
+        self.warm_up_batches = warm_up_batches
+        self.layout = None
+
+        self.build_sources()
+        self.initialize_data()
+
+        self._paused = False
+
+    @property
+    def paused(self):
+        return self._paused
+
+    def pause(self):
+        self._pause = True
+
+    def resume(self):
+        self._paused = False
+
+    def initialize_data(self):
         self.streaming_metrics = defaultdict(StreamingMetric)
         self.data_streams = defaultdict(lambda : np.array([]))
         self.profile = defaultdict(lambda : defaultdict(StreamingMetric))
 
-        self.warm_up_batches = warm_up_batches
-        self.layout = None
         self.start_time = None
 
-        self.build_sources()
+    def _get_data(self):
+        if not self.paused:
+            self.get_data()
 
     def start_and_warm_up(self):
-        self.simulator.start()
+        if not simulator.pipeline.is_alive():
+            self.simulator.start()
+
         for _ in range(self.warm_up_batches):
             self.simulator.get()
         self.simulator.pipeline.clear_profile_qs()
@@ -41,7 +65,7 @@ class VizApp:
         doc.add_root(self.layout)
 
         # update our data frequently
-        doc.add_periodic_callback(self.get_data, 20)
+        doc.add_periodic_callback(self._get_data, 20)
 
         # TODO: should the signal traces be updated
         # at a representative cadence?
