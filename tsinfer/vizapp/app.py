@@ -29,7 +29,8 @@ class VizApp:
 
         self.build_sources()
 
-    def warm_up(self):
+    def start_and_warm_up(self):
+        self.simulator.start()
         for _ in range(self.warm_up_batches):
             self.simulator.get()
         self.simulator.pipeline.clear_profile_qs()
@@ -48,12 +49,10 @@ class VizApp:
             if re.match("update_.+_plot", attr):
                 func = getattr(self, attr)
                 doc.add_periodic_callback(func, 100)
+        self.start_and_warm_up()
 
     def run(self, server):
-        self.simulator.start()
         try:
-            self.warm_up()
-
             server.io_loop.add_callback(server.show, "/")
             server.io_loop.start()
         except Exception as e:

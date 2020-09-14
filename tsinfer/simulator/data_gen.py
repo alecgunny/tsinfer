@@ -1,6 +1,6 @@
 from itertools import cycle
 
-from gwpy import TimeSeriesDict
+from gwpy.timeseries import TimeSeriesDict
 import numpy as np
 
 from tsinfer.pipeline.common import StoppableIteratingBuffer
@@ -42,11 +42,12 @@ class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
             t0,
             t0+duration,
             nproc=4,
-            allow_tape=True
+            allow_tape=True,
+            verbose="DOWNLOAD"
         )
         data.resample(fs)
 
-        target = data.pop(target_channel.value)
+        target = data.pop(target_channel).value
         channels = list(data.keys())
         data = np.stack([data[channel].value for channel in channels])
 

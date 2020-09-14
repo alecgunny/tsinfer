@@ -18,8 +18,8 @@ class Pipeline:
             url,
             model_name,
             model_version,
-            preproc_fn=None,
-            postproc_fn=None,
+            preprocessing_fn=None,
+            postprocessing_fn=None,
             qsize=100,
             profile=False
     ):
@@ -33,7 +33,7 @@ class Pipeline:
             kernel_size,
             kernel_stride,
             fs,
-            preproc_fn,
+            preprocessing_fn,
             q_in=input_data_q,
             q_out=preprocess_q,
             profile=profile
@@ -49,10 +49,7 @@ class Pipeline:
         )
     
         self.postprocessor = Postprocessor(
-            kernel_size,
-            kernel_stride,
-            fs,
-            postproc_fn,
+            postprocessing_fn,
             q_in=inference_q,
             q_out=postprocess_q,
             profile=profile
@@ -82,9 +79,17 @@ class Pipeline:
                 profile_dict[buff][func].update(latency)
         return profile_dict
 
+    def _clear_a_q(self, q):
+        # solution provided by https://stackoverflow.com/a/36018632
+        while True:
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                break
+
     def clear_profile_qs(self):
         for buff in self.buffers:
-            buff.latency_q.queue.clear()
+            self._clear_a_q(buff.latency_q)
 
     def start(self):
         if any([p.is_alive() for p in self.processes]):
@@ -127,5 +132,5 @@ class Pipeline:
 
     def clear_qs(self):
         for buff in self.buffers:
-            with buff.q_out.mutex:
-                buff.q_out.queue.clear()
+            self._clear_a_q(buff.q_out)
+

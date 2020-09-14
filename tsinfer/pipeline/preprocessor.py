@@ -163,7 +163,7 @@ class Preprocessor(StoppableIteratingBuffer):
         # I think append allocates another full array so maybe not
         shift = -(self._data.shape[1] - self.batch_overlap)
         self._data = np.roll(self._data, shift, axis=1)
-        self._target = np.roll(self._target, shift, axis=1)
+        self._target = np.roll(self._target, shift, axis=0)
 
     @streaming_func_timer
     def update(self):
