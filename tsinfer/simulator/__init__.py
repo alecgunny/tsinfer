@@ -1,2 +1,2 @@
-from data_gen import *
-from simulator import Simulator
+from .data_gen import *
+from .simulator import Simulator
