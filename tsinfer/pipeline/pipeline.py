@@ -19,7 +19,8 @@ class Pipeline:
             model_name,
             model_version,
             preprocessing_fn=None,
-            postprocessing_fn=None,
+            get_postprocess_fn=None,
+            postprocess_fn_kwargs={},
             qsize=100,
             profile=False
     ):
@@ -49,7 +50,8 @@ class Pipeline:
         )
     
         self.postprocessor = Postprocessor(
-            postprocessing_fn,
+            get_postprocess_fn,
+            postprocess_fn_kwargs,
             q_in=inference_q,
             q_out=postprocess_q,
             profile=profile
@@ -101,7 +103,7 @@ class Pipeline:
         return any([p.is_alive() for p in self.processes])
 
     def pause(self):
-        for buff in self.buffers:
+        for buff in self.buffers[::-1]:
             buff.pause()
 
     @property
@@ -124,11 +126,16 @@ class Pipeline:
 
     def update_preprocessor(self, params=None):
         assert self.paused
-        if params is not None:
-            self.preprocessor._param_q.put(params)
-        self.preprocessor._reset_flag.set()
-        while self.preprocessor._reset_flag.is_set():
-            pass
+        params = params or {}
+        self.preprocessor.param_q.put(params)
+        self.preprocessor.param_q.join()
+
+    def update_postprocessor(self, params=None):
+        assert self.paused
+        print("Putting params {}".format(params))
+        params = params or {}
+        self.postprocessor.param_q.put(params)
+        self.postprocessor.param_q.join()
 
     def clear_qs(self):
         for buff in self.buffers:

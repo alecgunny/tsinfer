@@ -34,8 +34,7 @@ class Preprocessor(StoppableIteratingBuffer):
         self.set_params(batch_size, kernel_size, kernel_stride, fs)
 
         self.channels = sorted(channels)
-        self._param_q = mp.Queue(1)
-        self._reset_flag = mp.Event()
+        self.param_q = mp.JoinableQueue(1)
 
         self.preproc_fn = preproc_fn
         super().__init__(**kwargs)
@@ -83,13 +82,14 @@ class Preprocessor(StoppableIteratingBuffer):
         self.fs = fs
 
     def check_updates(self):
-        if self._reset_flag.is_set():
-            try:
-                new_params = self._param_q.get_nowait()
-            except queue.Empty:
-                new_params = {}
+        try:
+            new_params = self.param_q.get_nowait()
+        except queue.Empty:
+            return
+        else:
+            print("Updating params: {}".format(new_params))
             self.set_params(**new_params)
-            self._reset_flag.clear()
+            self.param_q.task_done()
 
     def initialize_loop(self):
         self._last_sample_time = time.time()
@@ -114,7 +114,13 @@ class Preprocessor(StoppableIteratingBuffer):
         read individual samples and return an array of size
         `(len(self.channels), 1)` for hstacking
         '''
-        samples, target = self.get()
+        while True:
+            try:
+                samples, target = self.get(timeout=1e-6)
+                break
+            except queue.Empty as e:
+                if self.paused:
+                    raise e
 
         # make sure that we don't "peek" ahead at
         # data that isn't supposed to exist yet
@@ -191,7 +197,9 @@ class Preprocessor(StoppableIteratingBuffer):
     def loop(self):
         if self._last_sample_time is None:
             self.initialize_loop()
-
-        self.update()
+        try:
+            self.update()
+        except queue.Empty:
+            return
         self.prepare()
         self.reset()

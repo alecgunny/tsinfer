@@ -71,10 +71,13 @@ class StoppableIteratingBuffer:
             raise ValueError("Nowhere to put!")
         self.q_out.put(x, timeout=timeout)
 
-    def get(self):
+    def get(self, timeout=None):
         if self.q_in is None:
             raise ValueError("Nowhere to get!")
-        return self.q_in.get()
+        try:
+            return self.q_in.get(timeout=timeout)
+        except queue.Empty as e:
+            raise e
 
     @property
     def stopped(self):
@@ -98,15 +101,19 @@ class StoppableIteratingBuffer:
         self._pause_event.clear()
 
     def __call__(self):
-        self.initialize_loop()
-        while not self.stopped:
-            if not self.paused:
-                self.loop()
-            else:
-                self.check_updates()
+        try:
+            self.initialize_loop()
+            while not self.stopped:
+                if not self.paused:
+                    self.loop()
+                else:
+                    self.check_updates()
 
-        # allow for custom subclass cleanup
-        self.cleanup()
+        except:
+            self.cleanup()
+            raise
+        else:
+            self.cleanup()
 
     def initialize_loop(self):
         pass

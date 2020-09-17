@@ -1,4 +1,8 @@
 from functools import partial
+import queue
+import random
+import string
+import time
 
 import tritongrpcclient as triton
 
@@ -55,6 +59,8 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
 
         self.model_name = model_name
         self.model_version = str(model_version)
+
+        self._in_flight_requests = {}
         super().__init__(**kwargs)
 
     @streaming_func_timer
@@ -79,19 +85,34 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             self.latency_q.put((step, avg_time))
 
     def loop(self):
-        X, y, batch_start_time = self.get()
+        while True:
+            try:
+                X, y, batch_start_time = self.get(timeout=1e-6)
+                break
+            except queue.Empty:
+                if self.paused:
+                    return
+
         callback=partial(
             self.process_result, target=y, batch_start_time=batch_start_time
         )
  
         # TODO: is there a way to uniquely identify inference
         # requests such that we can keep track of round trip latency?
+        if self.profile:
+            start_time = time.time()
+            request_id = ''.join(random.choices(string.ascii_letters, k=16))
+            self._in_flight_requests[request_id] = start_time
+        else:
+            request_id = None
+
         self.client_input.set_data_from_numpy(X.astype("float32"))
         self.client.async_infer(
             model_name=self.model_name,
             model_version=self.model_version,
             inputs=[self.client_input],
             outputs=[self.client_output],
+            request_id=request_id,
             callback=callback
         )
 
@@ -102,3 +123,8 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         # TODO: add error checking
         prediction = result.as_numpy(self.client_output.name())
         self.put((prediction, target, batch_start_time))
+        if self.profile:
+            end_time = time.time()
+            start_time = self._in_flight_requests.pop(result.get_response().id)
+            self.latency_q.put(("total", end_time - start_time))
+

@@ -21,6 +21,7 @@ class Simulator:
         try:
             yield None
         finally:
+            print("Resuming")
             self.pipeline.resume()
             self.data_generator.resume()
 

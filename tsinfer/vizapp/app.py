@@ -8,20 +8,30 @@ from tsinfer.pipeline.common import StreamingMetric
 
 
 def pause_context(f):
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self, new):
         with self.simulator.pause():
             self.pause()
-            stuff = f(self, *args, **kwargs)
+            stuff = f(self, new)
             self.initialize_data()
-        self.warm_up()
+            self.simulator.pipeline.clear_qs()
+
+        self.start_and_warm_up()
         self.resume()
         return stuff
+    return wrapper
 
 
 class VizApp:
-    def __init__(self, simulator, warm_up_batches=50):
+    def __init__(
+            self,
+            simulator,
+            data_update_cadence_ms=50,
+            plot_update_cadence_ms=200,
+            warm_up_batches=50
+    ):
         self.simulator = simulator
-
+        self.data_update_cadence_ms = data_update_cadence_ms
+        self.plot_update_cadence_ms = plot_update_cadence_ms
         self.warm_up_batches = warm_up_batches
         self.layout = None
 
@@ -52,9 +62,10 @@ class VizApp:
             self.get_data()
 
     def start_and_warm_up(self):
-        if not simulator.pipeline.is_alive():
+        if not self.simulator.pipeline.is_alive():
             self.simulator.start()
 
+        print("Warming up for {} batches".format(self.warm_up_batches))
         for _ in range(self.warm_up_batches):
             self.simulator.get()
         self.simulator.pipeline.clear_profile_qs()
@@ -65,14 +76,14 @@ class VizApp:
         doc.add_root(self.layout)
 
         # update our data frequently
-        doc.add_periodic_callback(self._get_data, 20)
+        doc.add_periodic_callback(self._get_data, self.data_update_cadence_ms)
 
         # TODO: should the signal traces be updated
         # at a representative cadence?
         for attr in self.__dir__():
             if re.match("update_.+_plot", attr):
                 func = getattr(self, attr)
-                doc.add_periodic_callback(func, 100)
+                doc.add_periodic_callback(func, self.plot_update_cadence_ms)
         self.start_and_warm_up()
 
     def run(self, server):
