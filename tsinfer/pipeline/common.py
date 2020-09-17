@@ -58,6 +58,7 @@ class StoppableIteratingBuffer:
     def __init__(self, q_in=None, q_out=None, profile=False):
         self.q_in = q_in
         self.q_out = q_out
+        self.param_q = mp.JoinableQueue(1)
 
         if profile:
             self.latency_q = mp.Queue()
@@ -107,7 +108,17 @@ class StoppableIteratingBuffer:
                 if not self.paused:
                     self.loop()
                 else:
-                    self.check_updates()
+                    # if paused, try to update parameters
+                    try:
+                        new_params = self.param_q.get_nowait()
+                    except queue.Emtpy:
+                        continue
+                    else:
+                        for param, value in self.params:
+                            if param not in new_params:
+                                new_params[param] = value
+                        self.initialize(**new_params)
+                        self.param_q.join()
 
         except:
             self.cleanup()
@@ -125,7 +136,7 @@ class StoppableIteratingBuffer:
         '''
         pass
 
-    def check_updates(self):
+    def initialize(self):
         pass
 
     def cleanup(self):
