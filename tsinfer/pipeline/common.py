@@ -106,7 +106,12 @@ class StoppableIteratingBuffer:
             self.initialize_loop()
             while not self.stopped:
                 if not self.paused:
-                    self.loop()
+                    try:
+                        x, y, batch_start_time = self.get_data()
+                    except queue.Empty:
+                        continue
+                    else:
+                        self.run(x, y, batch_start_time)
                 else:
                     # if paused, try to update parameters
                     try:
@@ -129,8 +134,11 @@ class StoppableIteratingBuffer:
     def initialize_loop(self):
         pass
 
+    def get_data(self):
+        return self.get(timeout=1e-6)
+
     @abstractmethod
-    def loop(self):
+    def run(self, x, y, batch_start_time):
         '''
         required to have this method for main funcionality
         '''
