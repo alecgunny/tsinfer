@@ -1,4 +1,3 @@
-import queue
 import time
 
 from tsinfer.pipeline.common import StoppableIteratingBuffer, streaming_func_timer
@@ -25,7 +24,7 @@ class Postprocessor(StoppableIteratingBuffer):
             return self.postprocess_fn(prediction)
         return prediction
 
-    def loop(self, x, y, batch_start_time):
+    def run(self, x, y, batch_start_time):
         prediction = self.postprocess(x)
 
         # measure completion time for throughput measurement
