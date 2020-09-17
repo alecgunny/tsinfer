@@ -1,5 +1,4 @@
 from functools import partial
-import queue
 import random
 import string
 import time
@@ -91,15 +90,7 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             avg_time = getattr(inference_stats, step).ns / (10**9 * count)
             self.latency_q.put((step, avg_time))
 
-    def loop(self):
-        while True:
-            try:
-                X, y, batch_start_time = self.get(timeout=1e-6)
-                break
-            except queue.Empty:
-                if self.paused:
-                    return
-
+    def run(self, x, y, batch_start_time):
         callback=partial(
             self.process_result, target=y, batch_start_time=batch_start_time
         )
@@ -111,7 +102,7 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         else:
             request_id = None
 
-        self.client_input.set_data_from_numpy(X.astype("float32"))
+        self.client_input.set_data_from_numpy(x.astype("float32"))
         self.client.async_infer(
             model_name=self.params["model_name"],
             model_version=self.params["model_version"],
