@@ -124,20 +124,13 @@ class Pipeline:
 
         self.clear_qs()
 
-    def update_preprocessor(self, params=None):
+    def update(self, params):
         assert self.paused
-        params = params or {}
-        self.preprocessor.param_q.put(params)
-        self.preprocessor.param_q.join()
-
-    def update_postprocessor(self, params=None):
-        assert self.paused
-        print("Putting params {}".format(params))
-        params = params or {}
-        self.postprocessor.param_q.put(params)
-        self.postprocessor.param_q.join()
+        for buff in self.buffers:
+            if set(params.keys()) & set(buff.params.keys()):
+                buff.param_q.put(params)
+                buff.join()
 
     def clear_qs(self):
         for buff in self.buffers:
             self._clear_a_q(buff.q_out)
-
