@@ -116,6 +116,22 @@ class Preprocessor(StoppableIteratingBuffer):
         x = np.array(samples, dtype=np.float32)
         return x, target
 
+    def get_data(self):
+        # start by reading the next batch of samples
+        # TODO: play with numpy to see what's most efficient
+        # concat and reshape? read_sensor()[:, None]?
+        for i in range(self.batch_overlap, self._data.shape[1]):
+            x, y = self.read_sensor()
+            self._data[:, i] = x
+            self._target[i] = y
+
+            # measure the time the batch was created for profiling
+            # purposes. Again, not necessary for a production
+            # deployment
+            if i == self._batch.shape[2]:
+                batch_start_time = time.time()
+        return self._data, self._target, batch_start_time
+
     @streaming_func_timer
     def preprocess(self, x):
         '''
@@ -158,29 +174,6 @@ class Preprocessor(StoppableIteratingBuffer):
         shift = -(self._data.shape[1] - self.batch_overlap)
         self._data = np.roll(self._data, shift, axis=1)
         self._target = np.roll(self._target, shift, axis=0)
-
-    @streaming_func_timer
-    def get_data(self):
-        # start by reading the next batch of samples
-        # TODO: play with numpy to see what's most efficient
-        # concat and reshape? read_sensor()[:, None]?
-        for i in range(self.batch_overlap, self._data.shape[1]):
-            x, y = self.read_sensor()
-            self._data[:, i] = x
-            self._target[i] = y
-
-            # measure the time the batch was created for profiling
-            # purposes. Again, not necessary for a production
-            # deployment
-            if i == self._batch.shape[2]:
-                batch_start_time = time.time()
-        return self._data, self._target, batch_start_time
-
-    @streaming_func_timer
-    def prepare(self, x, y, batch_start_time):
-        x = self.preprocess(x)
-        batch = self.make_batch(x)
-        self.put((batch, y, batch_start_time))
 
     def run(self, x, y, batch_start_time):
         x = self.preprocess(x)
