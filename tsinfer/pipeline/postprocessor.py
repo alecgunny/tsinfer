@@ -12,8 +12,6 @@ class Postprocessor(StoppableIteratingBuffer):
         # TODO: use partial
         self.get_postprocess_fn = get_postprocess_fn
         self.initialize(postprocess_kwargs)
-
-        self.param_q = mp.JoinableQueue(1)
         super().__init__(**kwargs)
 
     def initialize(self, postprocess_kwargs):
@@ -27,19 +25,12 @@ class Postprocessor(StoppableIteratingBuffer):
             return self.postprocess_fn(prediction)
         return prediction
 
-    def loop(self):
-        while True:
-            try:
-                prediction, target, batch_start_time = self.get(timeout=1e-6)
-                break
-            except queue.Empty:
-                if self.paused:
-                    return
-        prediction = self.postprocess(prediction)
+    def loop(self, x, y, batch_start_time):
+        prediction = self.postprocess(x)
 
         # measure completion time for throughput measurement
         # here to be as accurate as possible
         batch_end_time = time.time()
 
         # send everything back to main process for handling
-        self.put((prediction, target, batch_start_time, batch_end_time))
+        self.put((prediction, y, batch_start_time, batch_end_time))
