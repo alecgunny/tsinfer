@@ -14,9 +14,12 @@ class DataGeneratorBuffer(StoppableIteratingBuffer):
         self.data_generator = iter(data_generator)
         super().__init__(**kwargs)
 
-    def loop(self):
+    def get_data(self):
         samples, target = next(self.data_generator)
-        self.put((samples, target))
+        return samples, target, None
+
+    def run(self, x, y, batch_start_time=None):
+        self.put((x, y))
 
 
 class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
