@@ -1,4 +1,3 @@
-import multiprocessing as mp
 import queue
 import time
 
@@ -26,30 +25,25 @@ class Preprocessor(StoppableIteratingBuffer):
         else:
             self.num_channels = len(channels)
 
-        self.batch_size = batch_size
-        self.kernel_size = kernel_size
-        self.kernel_stride = kernel_stride
-        self.fs = fs
-
-        self.set_params(batch_size, kernel_size, kernel_stride, fs)
+        self.initialize(
+            batch_size=batch_size,
+            kernel_size=kernel_size,
+            kernel_stride=kernel_stride,
+            fs=fs
+        )
 
         self.channels = sorted(channels)
-        self.param_q = mp.JoinableQueue(1)
-
         self.preproc_fn = preproc_fn
+
         super().__init__(**kwargs)
 
-    def set_params(
+    def initialize(
             self,
-            batch_size=None,
-            kernel_size=None,
-            kernel_stride=None,
-            fs=None
+            batch_size,
+            kernel_size,
+            kernel_stride,
+            fs
     ):
-        batch_size = batch_size or self.batch_size
-        kernel_size = kernel_size or self.kernel_size
-        kernel_stride = kernel_stride or self.kernel_stride
-        fs = fs or self.fs
 
         # total number of samples in a single batch
         num_samples = int((kernel_stride*(batch_size-1) + kernel_size)*fs)
@@ -76,20 +70,12 @@ class Preprocessor(StoppableIteratingBuffer):
         self._last_sample_time = None
         self._batch_start_time = None
 
-        self.batch_size = batch_size
-        self.kernel_size = kernel_size
-        self.kernel_stride = kernel_stride
-        self.fs = fs
-
-    def check_updates(self):
-        try:
-            new_params = self.param_q.get_nowait()
-        except queue.Empty:
-            return
-        else:
-            print("Updating params: {}".format(new_params))
-            self.set_params(**new_params)
-            self.param_q.task_done()
+        self.params = {
+            "batch_size": batch_size,
+            "kernel_size": kernel_size,
+            "kernel_stride": kernel_stride,
+            "fs": fs
+        }
 
     def initialize_loop(self):
         self._last_sample_time = time.time()
