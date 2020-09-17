@@ -116,7 +116,8 @@ class Preprocessor(StoppableIteratingBuffer):
         x = np.array(samples, dtype=np.float32)
         return x, target
 
-    def preprocess(self):
+    @streaming_func_timer
+    def preprocess(self, x):
         '''
         perform any preprocessing transformations on the data
         just does normalization for now
@@ -128,9 +129,10 @@ class Preprocessor(StoppableIteratingBuffer):
         # can be done that locally) to avoid doing thousands
         # of times on the same sample? Where is this limit?
         if self.preproc_fn is not None:
-            return self.preproc_fn(self._data)
-        return self._data
+            return self.preproc_fn(x)
+        return x
 
+    @streaming_func_timer
     def make_batch(self, data):
         '''
         take windows of data at strided intervals and stack them
@@ -158,7 +160,7 @@ class Preprocessor(StoppableIteratingBuffer):
         self._target = np.roll(self._target, shift, axis=0)
 
     @streaming_func_timer
-    def update(self):
+    def get_data(self):
         # start by reading the next batch of samples
         # TODO: play with numpy to see what's most efficient
         # concat and reshape? read_sensor()[:, None]?
@@ -171,21 +173,17 @@ class Preprocessor(StoppableIteratingBuffer):
             # purposes. Again, not necessary for a production
             # deployment
             if i == self._batch.shape[2]:
-                self._batch_start_time = time.time()
+                batch_start_time = time.time()
+        return self._data, self._target, batch_start_time
 
     @streaming_func_timer
-    def prepare(self):
-        data = self.preprocess()
-        batch = self.make_batch(data)
-        target = self._target.copy()
-        self.put((batch, target, self._batch_start_time))
+    def prepare(self, x, y, batch_start_time):
+        x = self.preprocess(x)
+        batch = self.make_batch(x)
+        self.put((batch, y, batch_start_time))
 
-    def loop(self):
-        if self._last_sample_time is None:
-            self.initialize_loop()
-        try:
-            self.update()
-        except queue.Empty:
-            return
-        self.prepare()
+    def run(self, x, y, batch_start_time):
+        x = self.preprocess(x)
+        x = self.make_batch(X)
+        self.put((x, y, batch_start_time))
         self.reset()
