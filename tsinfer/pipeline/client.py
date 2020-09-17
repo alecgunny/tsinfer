@@ -18,16 +18,28 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         if not client.is_server_live():
             raise RuntimeError("Server not live")
 
+        self.client = client
+        self.params = {"model_name": model_name, "model_version": str(model_version)}
+        self.initialize(model_name, model_version)
+
+        self._in_flight_requests = {}
+        super().__init__(**kwargs)
+
+    def initialize(self, model_name, model_version):
+        # first unload existing model
+        if model_name != self.params["model_name"]:
+            self.client.unload_model(model_name)
+
         # verify that model is ready
-        if not client.is_model_ready(model_name):
+        if not self.client.is_model_ready(model_name):
             # if not, try to load use model control API
             try:
-                client.load_model(model_name)
+                self.client.load_model(model_name)
 
             # if we can't load the model, first check if the given
             # name is even valid. If it is, throw our hands up
             except triton.InferenceServerException:
-                models = client.get_model_repository_index().models
+                models = self.client.get_model_repository_index().models
                 model_names = [model.name for model in models]
                 if model_name not in model_names:
                     raise ValueError(
@@ -40,9 +52,9 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
                             model_name)
                     )
             # double check that load worked
-            assert client.is_model_ready(model_name)
+            assert self.client.is_model_ready(model_name)
 
-        model_metadata = client.get_model_metadata(model_name)
+        model_metadata = self.client.get_model_metadata(model_name)
         # TODO: find better way to check version, or even to
         # load specific version
         # assert model_metadata.versions[0] == model_version
@@ -55,21 +67,16 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             model_input.name, tuple(model_input.shape), data_type
         )
         self.client_output = triton.InferRequestedOutput(model_output.name)
-        self.client = client
 
-        self.model_name = model_name
-        self.model_version = str(model_version)
-
-        self._in_flight_requests = {}
-        super().__init__(**kwargs)
+        self.params = {"model_name": model_name, "model_version": str(model_version)}
 
     @streaming_func_timer
     def update_latencies(self):
         model_stats = self.client.get_inference_statistics().model_stats
         for model_stat in model_stats:
             if (
-                    model_stat.name == self.model_name and
-                    model_stat.version == self.model_version
+                    model_stat.name == self.params["model_name"] and
+                    model_stat.version == self.params["model_version"]
             ):
                 inference_stats = model_stat.inference_stats
                 break
@@ -96,9 +103,7 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         callback=partial(
             self.process_result, target=y, batch_start_time=batch_start_time
         )
- 
-        # TODO: is there a way to uniquely identify inference
-        # requests such that we can keep track of round trip latency?
+
         if self.profile:
             start_time = time.time()
             request_id = ''.join(random.choices(string.ascii_letters, k=16))
@@ -108,8 +113,8 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
 
         self.client_input.set_data_from_numpy(X.astype("float32"))
         self.client.async_infer(
-            model_name=self.model_name,
-            model_version=self.model_version,
+            model_name=self.params["model_name"],
+            model_version=self.params["model_version"],
             inputs=[self.client_input],
             outputs=[self.client_output],
             request_id=request_id,
@@ -127,4 +132,3 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             end_time = time.time()
             start_time = self._in_flight_requests.pop(result.get_response().id)
             self.latency_q.put(("total", end_time - start_time))
-
