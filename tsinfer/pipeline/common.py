@@ -119,10 +119,10 @@ class StoppableIteratingBuffer:
                     except queue.Emtpy:
                         continue
                     else:
-                        for param, value in self.params:
-                            if param not in new_params:
-                                new_params[param] = value
-                        self.initialize(**new_params)
+                        params = {
+                            param: new_params.get(param, value) for param, value in self.params.items()
+                        }
+                        self.initialize(**params)
                         self.param_q.join()
 
         except:
