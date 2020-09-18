@@ -39,24 +39,35 @@ class Preprocessor(StoppableIteratingBuffer):
             fs
     ):
 
-        # total number of samples in a single batch
-        num_samples = int((kernel_stride*(batch_size-1)*fs) + int(kernel_size*fs)
+        # define sizes for everything
+        num_samples_frame = int(kernel_size*fs)
+        num_samples_stride = int(kernel_stride*fs)
+        num_samples_total = (batch_size-1)*num_samples_stride + num_samples_frame
+        num_samples_update = batch_size*num_samples_stride
+        batch_overlap = num_samples_total - num_samples_update
 
         # initialize arrays up front
-        self._data = np.empty((len(self.channels), num_samples), dtype=np.float32)
-        self._batch = np.empty((batch_size, len(self.channels), int(kernel_size*fs)), dtype=np.float32)
-        self._target = np.empty((num_samples,), dtype=np.float32)
+        dtype = np.float32
+        self._data = np.empty(
+            (len(self.channels), num_samples_total), dtype=dtype
+        )
+        self._extension = np.empty(
+            (len(self.channels), num_samples_update), dtype=dtype
+        )
+        self._batch = np.empty(
+            (batch_size, len(self.channels), num_samples_frame), dtype=dtype
+        )
+        self._target = np.empty((num_samples_total,), dtype=dtype)
     
-        # number of samples that overlap between batches
-        # means we need to update `num_samples - batch_overlap`
-        # samples at each iteration
-        self.batch_overlap = num_samples - int(fs*kernel_stride*batch_size)
+        # save this since we can get everything we need
+        # from this and the first dimension of _data
+        self.batch_overlap = batch_overlap
 
         # tells us how to window a 2D stream of data into a 3D batch
         slices = []
         for i in range(batch_size):
-            start = i*int(kernel_stride*fs)
-            stop = start + int(kernel_size*fs)
+            start = i*num_samples_stride
+            stop = start + num_samples_frame
             slices.append(slice(start, stop))
         self.slices = slices
 
@@ -167,11 +178,16 @@ class Preprocessor(StoppableIteratingBuffer):
         # Also, would it be faster to do an append then a slice?
         # I think append allocates another full array so maybe not
         shift = -(self._data.shape[1] - self.batch_overlap)
-        self._data = np.roll(self._data, shift, axis=1)
-        self._target = np.roll(self._target, shift, axis=0)
+        self._data = np.append(
+            self._data[:, -self.batch_overlap:], self._extension, axis=1
+        )
+        self._target = np.append(
+            self._target[-self.batch_overlap:], self._extension[0], axis=0
+        )
 
     def run(self, x, y, batch_start_time):
         x = self.preprocess(x)
         x = self.make_batch(x)
         self.put((x, y, batch_start_time))
         self.reset()
+
