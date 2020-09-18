@@ -117,6 +117,9 @@ class Preprocessor(StoppableIteratingBuffer):
         return x, target
 
     def get_data(self):
+        if self._last_sample_time is None:
+            self.initialize_loop()
+
         # start by reading the next batch of samples
         # TODO: play with numpy to see what's most efficient
         # concat and reshape? read_sensor()[:, None]?
@@ -177,6 +180,6 @@ class Preprocessor(StoppableIteratingBuffer):
 
     def run(self, x, y, batch_start_time):
         x = self.preprocess(x)
-        x = self.make_batch(X)
+        x = self.make_batch(x)
         self.put((x, y, batch_start_time))
         self.reset()

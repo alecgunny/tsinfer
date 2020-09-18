@@ -14,7 +14,7 @@ class Postprocessor(StoppableIteratingBuffer):
         super().__init__(**kwargs)
 
     def initialize(self, **kwargs):
-        if self.get_preprocess_fn is not None:
+        if self.get_postprocess_fn is not None:
             self.postprocess_fn = self.get_postprocess_fn(**kwargs)
         self.params = kwargs
 

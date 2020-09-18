@@ -116,14 +116,15 @@ class StoppableIteratingBuffer:
                     # if paused, try to update parameters
                     try:
                         new_params = self.param_q.get_nowait()
-                    except queue.Emtpy:
+                    except queue.Empty:
                         continue
                     else:
                         params = {
-                            param: new_params.get(param, value) for param, value in self.params.items()
+                            param: new_params.get(param, value) for 
+                                param, value in self.params.items()
                         }
                         self.initialize(**params)
-                        self.param_q.join()
+                        self.param_q.task_done()
 
         except:
             self.cleanup()

@@ -129,7 +129,7 @@ class Pipeline:
         for buff in self.buffers:
             if set(params.keys()) & set(buff.params.keys()):
                 buff.param_q.put(params)
-                buff.join()
+                buff.param_q.join()
 
     def clear_qs(self):
         for buff in self.buffers:
