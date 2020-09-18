@@ -10,13 +10,13 @@ class Postprocessor(StoppableIteratingBuffer):
     def __init__(self, get_postprocess_fn=None, postprocess_kwargs={}, **kwargs):
         # TODO: use partial
         self.get_postprocess_fn = get_postprocess_fn
-        self.initialize(postprocess_kwargs)
+        self.initialize(**postprocess_kwargs)
         super().__init__(**kwargs)
 
-    def initialize(self, postprocess_kwargs):
+    def initialize(self, **kwargs):
         if self.get_preprocess_fn is not None:
-            self.postprocess_fn = self.get_postprocess_fn(**postprocess_kwargs)
-        self.params = {"postprocess_kwargs": postprocess_kwargs}
+            self.postprocess_fn = self.get_postprocess_fn(**kwargs)
+        self.params = kwargs
 
     @streaming_func_timer
     def postprocess(self, prediction):
