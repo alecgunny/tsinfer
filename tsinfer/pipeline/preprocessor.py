@@ -1,3 +1,4 @@
+from functools import partial
 import queue
 import time
 
@@ -17,18 +18,20 @@ class Preprocessor(StoppableIteratingBuffer):
             kernel_size,
             kernel_stride,
             fs,
-            preproc_fn=None,
+            preprocessing_fn=None,
+            preprocessing_fn_kwargs=None,
             **kwargs
     ):
         self.channels = sorted(channels)
+        self._preprocessing_fn = preprocessing_fn
+        preprocessing_fn_kwargs = preprocessing_fn_kwargs or {}
         self.initialize(
             batch_size=batch_size,
             kernel_size=kernel_size,
             kernel_stride=kernel_stride,
-            fs=fs
+            fs=fs,
+            **preprocessing_fn_kwargs
         )
-        self.preproc_fn = preproc_fn
-
         super().__init__(**kwargs)
 
     def initialize(
@@ -36,9 +39,9 @@ class Preprocessor(StoppableIteratingBuffer):
             batch_size,
             kernel_size,
             kernel_stride,
-            fs
+            fs,
+            **kwargs
     ):
-
         # define sizes for everything
         num_samples_frame = int(kernel_size*fs)
         num_samples_stride = int(kernel_stride*fs)
@@ -75,12 +78,16 @@ class Preprocessor(StoppableIteratingBuffer):
         self._last_sample_time = None
         self._batch_start_time = None
 
+        if self._preprocessing_fn is not None:
+            self.preprocessing_fn = partial(self._preprocessing_fn, **kwargs)
+
         self.params = {
             "batch_size": batch_size,
             "kernel_size": kernel_size,
             "kernel_stride": kernel_stride,
             "fs": fs
         }
+        self.params.update(kwargs)
 
     def initialize_loop(self):
         self._last_sample_time = time.time()
@@ -142,16 +149,15 @@ class Preprocessor(StoppableIteratingBuffer):
     def preprocess(self, x):
         '''
         perform any preprocessing transformations on the data
-        just does normalization for now
         '''
-        # TODO: is there any extra preprocessing that should
-        # be done? With small enough strides and batch sizes,
+        # TODO: With small enough strides and batch sizes,
         # does there reach a point at which it makes sense
         # to do preproc on individual samples (assuming it
         # can be done that locally) to avoid doing thousands
         # of times on the same sample? Where is this limit?
-        if self.preproc_fn is not None:
-            return self.preproc_fn(x)
+        # How to let user decide if preproc can be done locally?
+        if self._preprocessing_fn is not None:
+            return self.preprocessing_fn(x)
         return x
 
     @streaming_func_timer
@@ -168,16 +174,9 @@ class Preprocessor(StoppableIteratingBuffer):
     @streaming_func_timer
     def reset(self):
         '''
-        shift over all the data elements so that we can populate
-        the leftovers with the next batch. Also update the
-        batch_start_time by a full batch worth of stride times
+        remove stale data elements and replace with empty
+        ones to be filled out by data generator
         '''
-        # TODO: does it make sense to do the copy here, since we'll
-        # need to be waiting for the next batch of samples to generate
-        # anyway?
-        # Also, would it be faster to do an append then a slice?
-        # I think append allocates another full array so maybe not
-        shift = -(self._data.shape[1] - self.batch_overlap)
         self._data = np.append(
             self._data[:, -self.batch_overlap:], self._extension, axis=1
         )
@@ -190,4 +189,3 @@ class Preprocessor(StoppableIteratingBuffer):
         x = self.make_batch(x)
         self.put((x, y, batch_start_time))
         self.reset()
-

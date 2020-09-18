@@ -19,8 +19,9 @@ class Pipeline:
             model_name,
             model_version,
             preprocessing_fn=None,
-            get_postprocess_fn=None,
-            postprocess_fn_kwargs={},
+            preprocessing_fn_kwargs=None
+            postprocessing_fn=None,
+            postprocessing_fn_kwargs=None,
             qsize=100,
             profile=False
     ):
@@ -35,6 +36,7 @@ class Pipeline:
             kernel_stride,
             fs,
             preprocessing_fn,
+            preprocessing_fn_kwargs=preprocessing_fn_kwargs,
             q_in=input_data_q,
             q_out=preprocess_q,
             profile=profile
@@ -50,8 +52,8 @@ class Pipeline:
         )
     
         self.postprocessor = Postprocessor(
-            get_postprocess_fn,
-            postprocess_fn_kwargs,
+            postprocessing_fn,
+            postprocessing_fn_kwargs,
             q_in=inference_q,
             q_out=postprocess_q,
             profile=profile

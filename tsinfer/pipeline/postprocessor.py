@@ -1,3 +1,4 @@
+from functools import partial
 import time
 
 from tsinfer.pipeline.common import StoppableIteratingBuffer, streaming_func_timer
@@ -7,21 +8,29 @@ from tsinfer.pipeline.common import StoppableIteratingBuffer, streaming_func_tim
 class Postprocessor(StoppableIteratingBuffer):
     __name__ = "Postprocessor"
 
-    def __init__(self, get_postprocess_fn=None, postprocess_kwargs={}, **kwargs):
-        # TODO: use partial
-        self.get_postprocess_fn = get_postprocess_fn
-        self.initialize(**postprocess_kwargs)
+    def __init__(
+            self,
+            postprocessing_fn=None,
+            postprocessing_fn_kwargs=None,
+            **kwargs
+    ):
+        # TODO: should windowing and aggregating really
+        # be a part of post-processing or built in
+        # functionality?
+        self._postprocessing_fn = postprocessing_fn
+        postprocessing_fn_kwargs = postprocessing_fn_kwargs or {}
+        self.initialize(**postprocessing_fn_kwargs)
         super().__init__(**kwargs)
 
     def initialize(self, **kwargs):
-        if self.get_postprocess_fn is not None:
-            self.postprocess_fn = self.get_postprocess_fn(**kwargs)
+        if self._postprocessing_fn is not None:
+            self.postprocessing_fn = partial(self._postprocessing_fn, **kwargs)
         self.params = kwargs
 
     @streaming_func_timer
     def postprocess(self, prediction):
-        if self.get_postprocess_fn is not None:
-            return self.postprocess_fn(prediction)
+        if self._postprocessing_fn is not None:
+            return self.postprocessing_fn(prediction)
         return prediction
 
     def run(self, x, y, batch_start_time):
