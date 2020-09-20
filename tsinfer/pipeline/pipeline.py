@@ -19,7 +19,7 @@ class Pipeline:
             model_name,
             model_version,
             preprocessing_fn=None,
-            preprocessing_fn_kwargs=None
+            preprocessing_fn_kwargs=None,
             postprocessing_fn=None,
             postprocessing_fn_kwargs=None,
             qsize=100,
@@ -88,7 +88,7 @@ class Pipeline:
         return profile_dict
 
     def start(self):
-        if self.is_alive():
+        if self.is_alive:
             raise RuntimeError("Processes already started")
         for p in self.processes:
             p.start()

@@ -62,7 +62,7 @@ class VizApp:
             self.get_data()
 
     def start_and_warm_up(self):
-        if not self.simulator.pipeline.is_alive():
+        if not self.simulator.pipeline.is_alive:
             self.simulator.start()
 
         print("Warming up for {} batches".format(self.warm_up_batches))

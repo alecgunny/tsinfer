@@ -1,6 +1,8 @@
 from functools import partial
 import time
 
+import numpy as np
+
 from tsinfer.pipeline.common import StoppableIteratingBuffer, streaming_func_timer
 
 
@@ -23,7 +25,13 @@ class Postprocessor(StoppableIteratingBuffer):
         # functionality?
         self._postprocessing_fn = postprocessing_fn
         postprocessing_fn_kwargs = postprocessing_fn_kwargs or {}
-        self.initialize(**postprocessing_fn_kwargs)
+        self.initialize(
+            batch_size,
+            kernel_size,
+            kernel_stride,
+            fs,
+            **postprocessing_fn_kwargs
+        )
         super().__init__(**kwargs)
 
     def initialize(
@@ -40,7 +48,7 @@ class Postprocessor(StoppableIteratingBuffer):
 
         # initialize an empty tensor to store aggregated predictions
         self._prediction = np.empty(
-            ((batch_size-1)*num_samples_stride+num_samples_frame,) dtype=np.float32
+            ((batch_size-1)*num_samples_stride+num_samples_frame,), dtype=np.float32
         )
 
         # initialize weights to multiply prediction by for
@@ -82,13 +90,13 @@ class Postprocessor(StoppableIteratingBuffer):
             return self.postprocessing_fn(prediction)
         return prediction
 
-    @streaming_func_time
+    @streaming_func_timer
     def aggregate(self, x):
         prediction = self._prediction*0
         weighted = self._aggregation_weights*x
         for i in range(self.params["batch_size"]):
             start = i*int(self.params["fs"]*self.params["kernel_stride"])
-            end = start + int(self.params["fs"] + self.params["kernel_size"])
+            end = start + int(self.params["fs"]*self.params["kernel_size"])
             prediction[start:end] += weighted[i]
         return prediction
 
