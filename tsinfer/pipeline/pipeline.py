@@ -41,7 +41,7 @@ class Pipeline:
             q_out=preprocess_q,
             profile=profile
         )
-    
+
         self.client = AsyncInferenceClient(
             url,
             model_name,
@@ -50,8 +50,12 @@ class Pipeline:
             q_out=inference_q,
             profile=profile
         )
-    
+
         self.postprocessor = Postprocessor(
+            batch_size,
+            kernel_size,
+            kernel_stride,
+            fs,
             postprocessing_fn,
             postprocessing_fn_kwargs,
             q_in=inference_q,
@@ -83,24 +87,13 @@ class Pipeline:
                 profile_dict[buff][func].update(latency)
         return profile_dict
 
-    def _clear_a_q(self, q):
-        # solution provided by https://stackoverflow.com/a/36018632
-        while True:
-            try:
-                q.get_nowait()
-            except queue.Empty:
-                break
-
-    def clear_profile_qs(self):
-        for buff in self.buffers:
-            self._clear_a_q(buff.latency_q)
-
     def start(self):
-        if any([p.is_alive() for p in self.processes]):
+        if self.is_alive():
             raise RuntimeError("Processes already started")
         for p in self.processes:
             p.start()
 
+    @property
     def is_alive(self):
         return any([p.is_alive() for p in self.processes])
 
@@ -132,6 +125,18 @@ class Pipeline:
             if set(params.keys()) & set(buff.params.keys()):
                 buff.param_q.put(params)
                 buff.param_q.join()
+
+    def _clear_a_q(self, q):
+        # solution provided by https://stackoverflow.com/a/36018632
+        while True:
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                break
+
+    def clear_profile_qs(self):
+        for buff in self.buffers:
+            self._clear_a_q(buff.latency_q)
 
     def clear_qs(self):
         for buff in self.buffers:
