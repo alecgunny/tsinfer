@@ -51,15 +51,22 @@ class Preprocessor(StoppableIteratingBuffer):
 
         # initialize arrays up front
         dtype = np.float32
+        # _data holds the single time series that gets windowed into
+        # our batch
         self._data = np.empty(
             (len(self.channels), num_samples_total), dtype=dtype
         )
+        # _extension holds the empty array used to extend _data at
+        # each iteration
         self._extension = np.empty(
             (len(self.channels), num_samples_update), dtype=dtype
         )
+        # _batch holds the windowed version of _data
         self._batch = np.empty(
             (batch_size, len(self.channels), num_samples_frame), dtype=dtype
         )
+        # _target holds the single time series corresponding to the
+        # target channel
         self._target = np.empty((num_samples_total,), dtype=dtype)
     
         # save this since we can get everything we need
@@ -76,7 +83,6 @@ class Preprocessor(StoppableIteratingBuffer):
 
         self.secs_per_sample = 1. / fs
         self._last_sample_time = None
-        self._batch_start_time = None
 
         if self._preprocessing_fn is not None:
             self.preprocessing_fn = partial(self._preprocessing_fn, **kwargs)
@@ -90,7 +96,6 @@ class Preprocessor(StoppableIteratingBuffer):
         self.params.update(kwargs)
 
     def initialize_loop(self):
-        self._last_sample_time = time.time()
         for i in range(self.batch_overlap):
             x, y = self.read_sensor()
             self._data[:, i] = x
@@ -103,9 +108,13 @@ class Preprocessor(StoppableIteratingBuffer):
         be necessary for real deployment where that
         obviously isn't an issue
         '''
-        while (time.time() - self._last_sample_time) < self.secs_per_sample:
-            continue
-        self._last_sample_time = time.time()
+        if self._last_sample_time is not None:
+            curr_time = time.time()
+            while (curr_time - self._last_sample_time) < self.secs_per_sample:
+                curr_time = time.time()
+        else:
+            curr_time = time.time()
+        self._last_sample_time = curr_time
 
     def read_sensor(self):
         '''
