@@ -5,7 +5,7 @@ import time
 
 import tritongrpcclient as triton
 
-from tsinfer.pipeline.common import StoppableIteratingBuffer, profile
+from tsinfer.pipeline.common import StoppableIteratingBuffer
 
 
 class AsyncInferenceClient(StoppableIteratingBuffer):
@@ -69,7 +69,7 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
 
         self.params = {"model_name": model_name, "model_version": str(model_version)}
 
-    @profile
+    @StoppableIteratingBuffer.profile
     def update_profiles(self):
         model_stats = self.client.get_inference_statistics().model_stats
         for model_stat in model_stats:
