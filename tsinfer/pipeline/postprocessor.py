@@ -59,9 +59,11 @@ class Postprocessor(StoppableIteratingBuffer):
         # batch_size = 4
         # then the inverse of the weight array should be
         # [ 1, 2, 3, 4, 4, 4, 4, 4]
-        # [ 2, 3, 4, 4, 4, 4, 4, 2]
+        # [ 2, 3, 4, 4, 4, 4, 4, 3]
         # [ 3, 4, 4, 4, 4, 4, 3, 2]
         # [ 4, 4, 4, 4, 4, 3, 2, 1]
+        # where each number represents the number of batch
+        # elements that got to "see" that sample
         self._aggregation_weights = np.ones(
             (batch_size, num_samples_frame), dtype=np.float32
         ) / batch_size
