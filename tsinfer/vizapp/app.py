@@ -4,21 +4,7 @@ import re
 
 import numpy as np
 
-from tsinfer.pipeline.common import StreamingMetric
-
-
-def pause_context(f):
-    def wrapper(self, new):
-        with self.simulator.pause():
-            self.pause()
-            stuff = f(self, new)
-            self.initialize_data()
-            self.simulator.pipeline.clear_qs()
-
-        self.start_and_warm_up()
-        self.resume()
-        return stuff
-    return wrapper
+from tsinfer import StreamingMetric
 
 
 class VizApp:
@@ -105,3 +91,17 @@ class VizApp:
     @abstractmethod
     def build_layout(self):
         pass
+
+    @staticmethod
+    def pause_context(f):
+        def wrapper(self, new):
+            with self.simulator.pause():
+                self.pause()
+                stuff = f(self, new)
+                self.initialize_data()
+                self.simulator.pipeline.clear_qs()
+
+            self.start_and_warm_up()
+            self.resume()
+            return stuff
+        return wrapper
