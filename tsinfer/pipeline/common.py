@@ -35,20 +35,6 @@ class StreamingMetric:
         self.var = (1-decay)*(self.var + decay*delta**2)
 
 
-def profile(f):
-    def wrapper(self, *args, **kwargs):
-        if self.profile:
-            start_time = time.time()
-            stuff = f(self, *args, **kwargs)
-            end_time = time.time()
-
-            self.latency_q.put((f.__name__, end_time-start_time))
-        else:
-            stuff = f(self, *args, **kwargs)
-        return stuff
-    return wrapper
-
-
 class StoppableIteratingBuffer:
     '''
     Parent class for callable Process targets
@@ -60,7 +46,7 @@ class StoppableIteratingBuffer:
         self.param_q = mp.JoinableQueue(1)
 
         if profile:
-            self.latency_q = mp.Queue()
+            self.profile_q = mp.Queue()
         self.profile = profile
 
         self._pause_event = mp.Event()
@@ -149,3 +135,17 @@ class StoppableIteratingBuffer:
 
     def cleanup(self):
         pass
+
+    @staticmethod
+    def profile(f):
+        def wrapper(self, *args, **kwargs):
+            if self.profile:
+                start_time = time.time()
+                stuff = f(self, *args, **kwargs)
+                end_time = time.time()
+
+                self.profile_q.put((f.__name__, end_time-start_time))
+            else:
+                stuff = f(self, *args, **kwargs)
+            return stuff
+        return wrapper
