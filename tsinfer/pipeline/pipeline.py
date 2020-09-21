@@ -81,7 +81,7 @@ class Pipeline:
         for buff in self.buffers:
             for i in range(max_gets):
                 try:
-                    func, latency = buff.latency_q.get_nowait()
+                    func, latency = buff.profile_q.get_nowait()
                 except queue.Empty:
                     break
                 profile_dict[buff][func].update(latency)
@@ -136,7 +136,7 @@ class Pipeline:
 
     def clear_profile_qs(self):
         for buff in self.buffers:
-            self._clear_a_q(buff.latency_q)
+            self._clear_a_q(buff.profile_q)
 
     def clear_qs(self):
         for buff in self.buffers:
