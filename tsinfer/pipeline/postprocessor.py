@@ -3,7 +3,7 @@ import time
 
 import numpy as np
 
-from tsinfer.pipeline.common import StoppableIteratingBuffer, profile
+from tsinfer.pipeline.common import StoppableIteratingBuffer
 
 
 
@@ -86,13 +86,13 @@ class Postprocessor(StoppableIteratingBuffer):
         }
         self.params.update(kwargs)
 
-    @profile
+    @StoppableIteratingBuffer.profile
     def postprocess(self, prediction):
         if self._postprocessing_fn is not None:
             return self.postprocessing_fn(prediction)
         return prediction
 
-    @profile
+    @StoppableIteratingBuffer.profile
     def aggregate(self, x):
         prediction = self._prediction*0
         weighted = self._aggregation_weights*x
