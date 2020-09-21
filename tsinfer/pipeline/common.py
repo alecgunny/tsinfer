@@ -26,17 +26,16 @@ class StreamingMetric:
         self.var = 0
 
     def update(self, measurement):
-        if self.samples_seen == 0:
-            self.mean = measurement
-        else:
-            decay = self.decay or 1./(self.samples_seen + 1)
-            delta = measurement - self.mean
-            self.mean += decay*delta
-            self.var = (1-decay)*(self.var + decay*delta**2)
         self.samples_seen += 1
 
+        decay = self.decay or 1./self.samples_seen
+        delta = measurement - self.mean
 
-def streaming_func_timer(f):
+        self.mean += decay*delta
+        self.var = (1-decay)*(self.var + decay*delta**2)
+
+
+def profile(f):
     def wrapper(self, *args, **kwargs):
         if self.profile:
             start_time = time.time()
