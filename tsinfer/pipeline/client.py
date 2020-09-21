@@ -88,7 +88,7 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         steps = ["queue", "compute_input", "compute_infer", "compute_output"]
         for step in steps:
             avg_time = getattr(inference_stats, step).ns / (10**9 * count)
-            self.latency_q.put((step, avg_time))
+            self.profile_q.put((step, avg_time))
 
     def run(self, x, y, batch_start_time):
         callback=partial(
@@ -122,4 +122,4 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         if self.profile:
             end_time = time.time()
             start_time = self._in_flight_requests.pop(result.get_response().id)
-            self.latency_q.put(("total", end_time - start_time))
+            self.profile_q.put(("total", end_time - start_time))
