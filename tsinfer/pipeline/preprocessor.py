@@ -4,11 +4,10 @@ import time
 
 import numpy as np
 
-from tsinfer.pipeline.common import StoppableIteratingBuffer, profile
+from tsinfer.pipeline.common import StoppableIteratingBuffer
 
 
 class Preprocessor(StoppableIteratingBuffer):
-    _LATENCY_WHITELIST = ["update"]
     __name__ = "Preprocessor"
 
     def __init__(
@@ -154,7 +153,7 @@ class Preprocessor(StoppableIteratingBuffer):
                 batch_start_time = time.time()
         return self._data, self._target, batch_start_time
 
-    @profile
+    @StoppableIteratingBuffer.profile
     def preprocess(self, x):
         '''
         perform any preprocessing transformations on the data
@@ -169,7 +168,7 @@ class Preprocessor(StoppableIteratingBuffer):
             return self.preprocessing_fn(x)
         return x
 
-    @profile
+    @StoppableIteratingBuffer.profile
     def make_batch(self, data):
         '''
         take windows of data at strided intervals and stack them
@@ -180,7 +179,7 @@ class Preprocessor(StoppableIteratingBuffer):
         # we need to do a copy, which I think we do
         return self._batch
 
-    @profile
+    @StoppableIteratingBuffer.profile
     def reset(self):
         '''
         remove stale data elements and replace with empty
