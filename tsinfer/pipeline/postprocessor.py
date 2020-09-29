@@ -47,7 +47,7 @@ class Postprocessor(StoppableIteratingBuffer):
         num_samples_total = (batch_size-1)*num_samples_stride + num_samples_frame
 
         # initialize an empty tensor to store aggregated predictions
-        self._prediction = np.empty(
+        self._prediction = np.zeros(
             ((batch_size-1)*num_samples_stride+num_samples_frame,), dtype=np.float32
         )
 
@@ -112,3 +112,4 @@ class Postprocessor(StoppableIteratingBuffer):
 
         # send everything back to main process for handling
         self.put((prediction, y, batch_start_time, batch_end_time))
+

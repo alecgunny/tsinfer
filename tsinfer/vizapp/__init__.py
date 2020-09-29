@@ -1,1 +1,1 @@
-from .app import VizApp, pause_context
+from .app import VizApp

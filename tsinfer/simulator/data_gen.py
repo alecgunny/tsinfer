@@ -6,7 +6,7 @@ import numpy as np
 from tsinfer.pipeline.common import StoppableIteratingBuffer
 
 
-__all__ = ["GwpyTimeSeriesDataGenerator"]
+__all__ = ["GwpyTimeSeriesDataGenerator", "DummyDataGenerator"]
 
 
 class DataGeneratorBuffer(StoppableIteratingBuffer):
@@ -27,8 +27,9 @@ class DummyDataGenerator(DataGeneratorBuffer):
         def data_generator():
             while True:
                 data = np.random.randn(len(chanslist)).astype(np.float32)
-                target = np.random.randn().astype(np.float32)
-                yield {channel: x for channel, x in zip(chanslist, data)}, target
+                samples = {channel: x for channel, x in zip(chanslist, data)}
+                target = np.float32(np.random.randn())
+                yield samples, target
         super().__init__(data_generator(), **kwargs)
 
 
