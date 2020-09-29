@@ -22,6 +22,16 @@ class DataGeneratorBuffer(StoppableIteratingBuffer):
         self.put((x, y))
 
 
+class DummyDataGenerator(DataGeneratorBuffer):
+    def __init__(self, chanslist, **kwargs):
+        def data_generator():
+            while True:
+                data = np.random.randn(len(chanslist)).astype(np.float32)
+                target = np.random.randn().astype(np.float32)
+                yield {channel: x for channel, x in zip(chanslist, data)}, target
+        super().__init__(data_generator(), **kwargs)
+
+
 class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
     def __init__(
             self,
