@@ -70,8 +70,11 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         self.params = {"model_name": model_name, "model_version": str(model_version)}
 
     @StoppableIteratingBuffer.profile
-    def update_profiles(self):
-        model_stats = self.client.get_inference_statistics().model_stats
+    def pull_stats(self):
+        return self.client.get_inference_statistics().model_stats
+
+    @StoppableIteratingBuffer.profile
+    def update_profiles(self, model_stats):
         for model_stat in model_stats:
             if (
                     model_stat.name == self.params["model_name"] and
@@ -95,12 +98,10 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             self.process_result, target=y, batch_start_time=batch_start_time
         )
 
+        request_id = ''.join(random.choices(string.ascii_letters, k=16))
         if self.profile:
             start_time = time.time()
-            request_id = ''.join(random.choices(string.ascii_letters, k=16))
             self._in_flight_requests[request_id] = start_time
-        else:
-            request_id = None
 
         self.client_input.set_data_from_numpy(x.astype("float32"))
         self.client.async_infer(
@@ -113,12 +114,14 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         )
 
         if self.profile:
-            self.update_profiles()
-    
+            stats = self.pull_stats()
+            self.update_profiles(stats)
+
     def process_result(self, target, batch_start_time, result, error):
         # TODO: add error checking
         prediction = result.as_numpy(self.client_output.name())
         self.put((prediction, target, batch_start_time))
+
         if self.profile:
             end_time = time.time()
             start_time = self._in_flight_requests.pop(result.get_response().id)

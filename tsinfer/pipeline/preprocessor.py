@@ -130,7 +130,7 @@ class Preprocessor(StoppableIteratingBuffer):
 
         # make sure that we don't "peek" ahead at
         # data that isn't supposed to exist yet
-        self.maybe_wait()
+        # self.maybe_wait()
 
         samples = [samples[channel] for channel in self.channels]
         x = np.array(samples, dtype=np.float32)
