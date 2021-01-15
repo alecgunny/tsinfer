@@ -1,0 +1,22 @@
+[tool.black]
+line-length = 82
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+known_first_party = ["exportlib"]
+known_third_party = ["numpy", "setuptools", "tritongrpcclient"]
+multi_line_output = 3
+include_trailing_comma = true
