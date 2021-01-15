@@ -1,5 +1,5 @@
-from contextlib import contextmanager
 import multiprocessing as mp
+from contextlib import contextmanager
 
 
 class Simulator:

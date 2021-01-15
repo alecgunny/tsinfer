@@ -1,29 +1,29 @@
 import multiprocessing as mp
 import queue
 
-from tsinfer.pipeline.preprocessor import Preprocessor
 from tsinfer.pipeline.client import AsyncInferenceClient
 from tsinfer.pipeline.postprocessor import Postprocessor
+from tsinfer.pipeline.preprocessor import Preprocessor
 
 
 class Pipeline:
     def __init__(
-            self,
-            input_data_q,
-            batch_size,
-            channels,
-            kernel_size,
-            kernel_stride,
-            fs,
-            url,
-            model_name,
-            model_version,
-            preprocessing_fn=None,
-            preprocessing_fn_kwargs=None,
-            postprocessing_fn=None,
-            postprocessing_fn_kwargs=None,
-            qsize=100,
-            profile=False
+        self,
+        input_data_q,
+        batch_size,
+        channels,
+        kernel_size,
+        kernel_stride,
+        fs,
+        url,
+        model_name,
+        model_version,
+        preprocessing_fn=None,
+        preprocessing_fn_kwargs=None,
+        postprocessing_fn=None,
+        postprocessing_fn_kwargs=None,
+        qsize=100,
+        profile=False,
     ):
         preprocess_q = mp.Queue(qsize)
         inference_q = mp.Queue(qsize)
@@ -39,7 +39,7 @@ class Pipeline:
             preprocessing_fn_kwargs=preprocessing_fn_kwargs,
             q_in=input_data_q,
             q_out=preprocess_q,
-            profile=profile
+            profile=profile,
         )
 
         self.client = AsyncInferenceClient(
@@ -48,7 +48,7 @@ class Pipeline:
             model_version,
             q_in=preprocess_q,
             q_out=inference_q,
-            profile=profile
+            profile=profile,
         )
 
         self.postprocessor = Postprocessor(
@@ -60,7 +60,7 @@ class Pipeline:
             postprocessing_fn_kwargs,
             q_in=inference_q,
             q_out=postprocess_q,
-            profile=profile
+            profile=profile,
         )
 
         self.processes = []

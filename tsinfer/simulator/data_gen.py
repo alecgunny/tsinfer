@@ -1,18 +1,17 @@
 import os
 import re
 import time
-
 from itertools import cycle
+
 import numpy as np
 
 from tsinfer.pipeline.common import StoppableIteratingBuffer
-
 
 __all__ = [
     "DataGeneratorBuffer",
     "GwpyTimeSeriesDataGenerator",
     "DummyDataGenerator",
-    "LowLatencyFrameDataGenerator"
+    "LowLatencyFrameDataGenerator",
 ]
 
 
@@ -37,30 +36,24 @@ class DummyDataGenerator(DataGeneratorBuffer):
                 samples = {channel: x for channel, x in zip(chanslist, data)}
                 target = np.float32(np.random.randn())
                 yield samples, target
+
         super().__init__(data_generator(), **kwargs)
 
 
 class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
-    def __init__(
-            self,
-            chanslist,
-            t0,
-            duration,
-            fs,
-            target_channel=0,
-            **kwargs
-    ):
+    def __init__(self, chanslist, t0, duration, fs, target_channel=0, **kwargs):
         target_channel, chanslist = _validate_target_channel(
-            target_channel, chanslist)
+            target_channel, chanslist
+        )
         TimeSeriesDict = _import_gwpy()
 
         data = TimeSeriesDict.get(
             chanslist,
             t0,
-            t0+duration,
+            t0 + duration,
             nproc=4,
             allow_tape=True,
-            verbose="DOWNLOAD"
+            verbose="DOWNLOAD",
         )
         data.resample(fs)
 
@@ -69,9 +62,12 @@ class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
         data = np.stack([data[channel].value for channel in channels])
 
         def data_generator():
-            for idx in cycle(range(int(fs*duration))):
-                samples = {channel: x for channel, x in zip(channels, data[:, idx])}
+            for idx in cycle(range(int(fs * duration))):
+                samples = {
+                    channel: x for channel, x in zip(channels, data[:, idx])
+                }
                 yield samples, target[idx]
+
         super().__init__(data_generator(), **kwargs)
 
 
@@ -84,10 +80,11 @@ class LowLatencyFrameDataGenerator(DataGeneratorBuffer):
         t0=None,
         file_pattern=None,
         target_channel=0,
-        **kwargs
+        **kwargs,
     ):
         target_channel, chanslist = _validate_target_channel(
-            target_channel, chanslist)
+            target_channel, chanslist
+        )
         TimeSeriesDict = _import_gwpy()
 
         if file_pattern is None and t0 is None:
@@ -95,7 +92,7 @@ class LowLatencyFrameDataGenerator(DataGeneratorBuffer):
                 "Must specify either a file pattern or initial timestamp"
             )
         elif file_pattern is None:
-            file_pattern = re.compile(f".*-{t0}-.*\.gwf")
+            file_pattern = re.compile(fr".*-{t0}-.*\.gwf")
             files = list(filter(file_pattern.full_match, os.listdir(data_dir)))
             if len(files) == 0:
                 raise ValueError(
@@ -146,10 +143,13 @@ class LowLatencyFrameDataGenerator(DataGeneratorBuffer):
                 # TODO: how does rounding work for non-integer fs
                 # TODO: pass chunks, accommodate on preproc end
                 for idx in range(int(fs)):
-                    samples = {channel: x for channel, x in zip(channels, data[:, idx])}
+                    samples = {
+                        channel: x for channel, x in zip(channels, data[:, idx])
+                    }
                     yield samples, target[idx]
                 t0 += 1
-        super().__init__(data_generator(t0+0), **kwargs)
+
+        super().__init__(data_generator(t0 + 0), **kwargs)
 
 
 def _validate_target_channel(target_channel, chanslist):

@@ -1,7 +1,7 @@
-from functools import partial
 import random
 import string
 import time
+from functools import partial
 
 import tritongrpcclient as triton
 
@@ -18,7 +18,10 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             raise RuntimeError("Server not live")
 
         self.client = client
-        self.params = {"model_name": model_name, "model_version": str(model_version)}
+        self.params = {
+            "model_name": model_name,
+            "model_version": str(model_version),
+        }
         self.initialize(model_name, model_version)
 
         self._in_flight_requests = {}
@@ -43,12 +46,14 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
                 if model_name not in model_names:
                     raise ValueError(
                         "Model name {} not one of available models: {}".format(
-                            model_name, ", ".join(model_names))
+                            model_name, ", ".join(model_names)
+                        )
                     )
                 else:
                     raise RuntimeError(
                         "Couldn't load model {} for unknown reason".format(
-                            model_name)
+                            model_name
+                        )
                     )
             # double check that load worked
             assert self.client.is_model_ready(model_name)
@@ -67,7 +72,10 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         )
         self.client_output = triton.InferRequestedOutput(model_output.name)
 
-        self.params = {"model_name": model_name, "model_version": str(model_version)}
+        self.params = {
+            "model_name": model_name,
+            "model_version": str(model_version),
+        }
 
     @StoppableIteratingBuffer.profile
     def pull_stats(self):
@@ -77,8 +85,8 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
     def update_profiles(self, model_stats):
         for model_stat in model_stats:
             if (
-                    model_stat.name == self.params["model_name"] and
-                    model_stat.version == self.params["model_version"]
+                model_stat.name == self.params["model_name"]
+                and model_stat.version == self.params["model_version"]
             ):
                 inference_stats = model_stat.inference_stats
                 break
@@ -90,15 +98,15 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
 
         steps = ["queue", "compute_input", "compute_infer", "compute_output"]
         for step in steps:
-            avg_time = getattr(inference_stats, step).ns / (10**9 * count)
+            avg_time = getattr(inference_stats, step).ns / (10 ** 9 * count)
             self.profile_q.put((step, avg_time))
 
     def run(self, x, y, batch_start_time):
-        callback=partial(
+        callback = partial(
             self.process_result, target=y, batch_start_time=batch_start_time
         )
 
-        request_id = ''.join(random.choices(string.ascii_letters, k=16))
+        request_id = "".join(random.choices(string.ascii_letters, k=16))
         if self.profile:
             start_time = time.time()
             self._in_flight_requests[request_id] = start_time
@@ -110,7 +118,7 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             inputs=[self.client_input],
             outputs=[self.client_output],
             request_id=request_id,
-            callback=callback
+            callback=callback,
         )
 
         if self.profile:

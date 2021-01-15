@@ -1,5 +1,5 @@
 class StreamingMetric:
-    '''
+    """
     Class for updating measurement mean and variance
     statistics in an online fashion using a moving
     (and possibly decaying) average
@@ -10,7 +10,8 @@ class StreamingMetric:
         Higher values mean older measurements are downweighted
         more quickly. If left as `None`, a true online average
         will be used
-    '''
+    """
+
     def __init__(self, decay=None):
         if decay is not None:
             assert 0 < decay and decay <= 1
@@ -22,8 +23,8 @@ class StreamingMetric:
     def update(self, measurement):
         self.samples_seen += 1
 
-        decay = self.decay or 1./self.samples_seen
+        decay = self.decay or 1.0 / self.samples_seen
         delta = measurement - self.mean
 
-        self.mean += decay*delta
-        self.var = (1-decay)*(self.var + decay*delta**2)
+        self.mean += decay * delta
+        self.var = (1 - decay) * (self.var + decay * delta ** 2)

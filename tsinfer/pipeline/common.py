@@ -1,14 +1,16 @@
-from abc import abstractmethod
 import multiprocessing as mp
 import queue
 import time
+from abc import abstractmethod
 
 
 class StoppableIteratingBuffer:
-    '''
+    """
     Parent class for callable Process targets
-    '''
+    """
+
     _LATENCY_WHITELIST = []
+
     def __init__(self, q_in=None, q_out=None, profile=False):
         self.q_in = q_in
         self.q_out = q_out
@@ -74,16 +76,15 @@ class StoppableIteratingBuffer:
                         continue
                     else:
                         params = {
-                            param: new_params.get(param, value) for 
-                                param, value in self.params.items()
+                            param: new_params.get(param, value)
+                            for param, value in self.params.items()
                         }
                         self.initialize(**params)
                         self.param_q.task_done()
 
-        except:
-            self.cleanup()
-            raise
-        else:
+        except Exception as e:
+            self.put(e)
+        finally:
             self.cleanup()
 
     def initialize_loop(self):
@@ -94,9 +95,9 @@ class StoppableIteratingBuffer:
 
     @abstractmethod
     def run(self, x, y, batch_start_time):
-        '''
+        """
         required to have this method for main funcionality
-        '''
+        """
         pass
 
     def initialize(self):
@@ -113,8 +114,9 @@ class StoppableIteratingBuffer:
                 stuff = f(self, *args, **kwargs)
                 end_time = time.time()
 
-                self.profile_q.put((f.__name__, end_time-start_time))
+                self.profile_q.put((f.__name__, end_time - start_time))
             else:
                 stuff = f(self, *args, **kwargs)
             return stuff
+
         return wrapper

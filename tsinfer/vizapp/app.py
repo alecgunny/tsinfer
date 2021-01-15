@@ -1,6 +1,6 @@
+import re
 from abc import abstractmethod
 from collections import defaultdict
-import re
 
 import numpy as np
 
@@ -9,11 +9,11 @@ from tsinfer import StreamingMetric
 
 class VizApp:
     def __init__(
-            self,
-            simulator,
-            data_update_cadence_ms=50,
-            plot_update_cadence_ms=200,
-            warm_up_batches=50
+        self,
+        simulator,
+        data_update_cadence_ms=50,
+        plot_update_cadence_ms=200,
+        warm_up_batches=50,
     ):
         self.simulator = simulator
         self.data_update_cadence_ms = data_update_cadence_ms
@@ -38,8 +38,8 @@ class VizApp:
 
     def initialize_data(self):
         self.streaming_metrics = defaultdict(StreamingMetric)
-        self.data_streams = defaultdict(lambda : np.array([]))
-        self.profile = defaultdict(lambda : defaultdict(StreamingMetric))
+        self.data_streams = defaultdict(lambda: np.array([]))
+        self.profile = defaultdict(lambda: defaultdict(StreamingMetric))
 
         self.start_time = None
 
@@ -104,4 +104,5 @@ class VizApp:
             self.start_and_warm_up()
             self.resume()
             return stuff
+
         return wrapper
