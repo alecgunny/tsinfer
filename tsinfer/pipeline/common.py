@@ -6,6 +6,9 @@ from abc import abstractmethod
 
 import attr
 
+if typing.TYPE_CHECKING:
+    import numpy as np
+
 
 class StoppableIteratingBuffer:
     """
@@ -100,13 +103,11 @@ class StoppableIteratingBuffer:
                 # otherwise, try to do get data and run main
                 # process on it
                 try:
-                    stuff = self.get_data()
+                    packages = self.get_data()
                 except queue.Empty:
                     continue
                 else:
-                    # TODO: multi-thread this?
-                    for name, (x, batch_start_time) in stuff.items():
-                        self.run(x, batch_start_time, name=name)
+                    self.run(packages)
 
         except Exception as e:
             self.put(e)
@@ -117,17 +118,18 @@ class StoppableIteratingBuffer:
         pass
 
     def get_data(self):
-        stuff = {}
+        packages = {}
         if isinstance(self.q_in, dict):
             for name, q in self.q_in.items():
                 try:
-                    self.get(name, timeout=1e-6)
+                    stuff = self.get(name, timeout=1e-6)
                 except queue.Empty:
                     continue
+                packages[name] = stuff
 
             # nothing is running, so raise Empty so
             # that __call__ loop continues
-            if len(stuff) == 0:
+            if len(packages) == 0:
                 raise queue.Empty
 
             # only some of the queues not providing data,
@@ -135,31 +137,32 @@ class StoppableIteratingBuffer:
             # them another chance to provide data, but
             # if they still have nothing then raise an
             # error
-            if len(stuff) < len(self.q_in):
-                for key in set(self.q_in) - set(stuff):
+            if len(packages) < len(self.q_in):
+                for key in set(self.q_in) - set(packages):
                     try:
-                        self.get(name, timeout=1e-6)
+                        stuff = self.get(name, timeout=1e-6)
                     except queue.Empty:
                         raise RuntimeError(
                             "Process {} not providing any "
                             "new data".format(name)
                         )
+                    packages[key] = stuff
         else:
-            stuff[None] = self.get(timeout=1e-6)
+            packages[None] = self.get(timeout=1e-6)
 
         # if any of our input processes raised an error,
         # then pass it along and stop this process. Throw
         # a queue.Empty so that the __call__ process goes
         # to the top of the loop then breaks
         exceptions = list(
-            filter(lambda x: isinstance(x, Exception), stuff.values())
+            filter(lambda x: isinstance(x, Exception), packages.values())
         )
         if len(exceptions) > 0:
             self.put(exceptions[0])
             self.stop()
             raise queue.Empty
 
-        return stuff
+        return {name: Package(*stuff) for name, stuff in packages.items()}
 
     @abstractmethod
     def run(self, x, batch_start_time, name=None):
@@ -182,12 +185,21 @@ class StoppableIteratingBuffer:
                 stuff = f(self, *args, **kwargs)
                 end_time = time.time()
 
-                self.profile_q.put((f.__name__, end_time - start_time))
+                name = f.__name__
+                if kwargs.get("name") is not None:
+                    name += "." + kwargs[name]
+                self.profile_q.put((name, end_time - start_time))
             else:
                 stuff = f(self, *args, **kwargs)
             return stuff
 
         return wrapper
+
+
+@attr.s(auto_attribs=True)
+class Package:
+    x: np.Array
+    batch_start_time: float
 
 
 @attr.s(auto_attribs=True)

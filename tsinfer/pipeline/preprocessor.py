@@ -60,8 +60,8 @@ class Preprocessor(StoppableIteratingBuffer):
             paths = self.paths
 
         self._data = {}
-        self._extension = {}
         self._batch = {}
+        self._extensions = {}
         self._preprocessing_fns = {}
         for name, path in paths.items():
             try:
@@ -74,15 +74,17 @@ class Preprocessor(StoppableIteratingBuffer):
             self._data[name] = np.empty(
                 (num_channels, num_samples_total), dtype=dtype
             )
+            # _batch holds the windowed version of _data
+            self._batch[name] = np.empty(
+                (batch_size, num_channels, num_samples_frame), dtype=dtype
+            )
+
             # _extension holds the empty array used to extend _data at
             # each iteration
             self._extension[name] = np.empty(
                 (num_channels, num_samples_update), dtype=dtype
             )
-            # _batch holds the windowed version of _data
-            self._batch[name] = np.empty(
-                (batch_size, num_channels, num_samples_frame), dtype=dtype
-            )
+
             if path.processing_fn is not None:
                 if name is None:
                     fn_kwargs = kwargs
@@ -175,7 +177,7 @@ class Preprocessor(StoppableIteratingBuffer):
         return self._data, self._target, batch_start_time
 
     @StoppableIteratingBuffer.profile
-    def preprocess(self, x):
+    def preprocess(self, x, name=None):
         """
         perform any preprocessing transformations on the data
         """
@@ -185,36 +187,43 @@ class Preprocessor(StoppableIteratingBuffer):
         # can be done that locally) to avoid doing thousands
         # of times on the same sample? Where is this limit?
         # How to let user decide if preproc can be done locally?
-        if self._preprocessing_fn is not None:
-            return self.preprocessing_fn(x)
+        preproc_fn = self._preprocessing_fns.get(name)
+        if preproc_fn is not None:
+            return self.preproc_fn(x)
         return x
 
     @StoppableIteratingBuffer.profile
-    def make_batch(self, data):
+    def make_batch(self, data, name=None):
         """
         take windows of data at strided intervals and stack them
         """
         for i, slc in enumerate(self.slices):
-            self._batch[i] = data[:, slc]
+            self._batch[name][i] = data[name][:, slc]
         # doing a return here in case we decide
         # we need to do a copy, which I think we do
-        return self._batch
+        return self._batch[name]
 
     @StoppableIteratingBuffer.profile
-    def reset(self):
+    def reset(self, name=None):
         """
         remove stale data elements and replace with empty
         ones to be filled out by data generator
         """
-        self._data = np.append(
-            self._data[:, -self.batch_overlap :], self._extension, axis=1
-        )
-        self._target = np.append(
-            self._target[-self.batch_overlap :], self._extension[0], axis=0
+        self._data[name] = np.append(
+            self._data[name][:, -self.batch_overlap :], self._extension, axis=1
         )
 
-    def run(self, x, y, batch_start_time):
-        x = self.preprocess(x)
-        x = self.make_batch(x)
-        self.put((x, y, batch_start_time))
-        self.reset()
+    def run(self, packages):
+        # TODO: thread this?
+        put_obj = {}
+        for name, package in packages.items():
+            x = self.preprocess(package.x, name=name)
+            x = self.make_batch(package.x, name=name)
+            put_obj[name] = (x, package.batch_start_time)
+
+        if set(put_obj) == set([None]):
+            put_obj = put_obj.pop(None)
+        self.put(put_obj)
+
+        for name in packages:
+            self.reset(name)
