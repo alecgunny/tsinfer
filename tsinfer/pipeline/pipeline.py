@@ -1,54 +1,78 @@
 import multiprocessing as mp
 import queue
+import typing
 
 from tsinfer.pipeline.client import AsyncInferenceClient
+from tsinfer.pipeline.common import Path
 from tsinfer.pipeline.postprocessor import Postprocessor
 from tsinfer.pipeline.preprocessor import Preprocessor
+
+
+def _dict_of(_type):
+    return typing.Union[_type, typing.Dict[str, _type]]
 
 
 class Pipeline:
     def __init__(
         self,
-        input_data_q,
-        batch_size,
-        channels,
-        kernel_size,
-        kernel_stride,
-        fs,
-        url,
-        model_name,
-        model_version,
-        preprocessing_fn=None,
-        preprocessing_fn_kwargs=None,
-        postprocessing_fn=None,
-        postprocessing_fn_kwargs=None,
-        qsize=100,
-        profile=False,
+        batch_size: int,
+        kernel_size: float,
+        kernel_stride: float,
+        fs: int,
+        server_url: str,
+        model_name: str,
+        model_version: int,
+        preprocessing_fn: typing.Optional[_dict_of(typing.Callable)] = None,
+        preprocessing_fn_kwargs: typing.Optional[_dict_of(dict)] = None,
+        postprocessing_fn: typing.Optional[_dict_of(typing.Callable)] = None,
+        postprocessing_fn_kwargs: typing.Optional[_dict_of(dict)] = None,
+        qsize: int = 100,
+        profile: bool = False,
     ):
         preprocess_q = mp.Queue(qsize)
         inference_q = mp.Queue(qsize)
         postprocess_q = mp.Queue(qsize)
 
-        self.preprocessor = Preprocessor(
-            batch_size,
-            channels,
-            kernel_size,
-            kernel_stride,
-            fs,
-            preprocessing_fn,
-            preprocessing_fn_kwargs=preprocessing_fn_kwargs,
-            q_in=input_data_q,
-            q_out=preprocess_q,
-            profile=profile,
-        )
-
         self.client = AsyncInferenceClient(
-            url,
+            server_url,
             model_name,
             model_version,
             q_in=preprocess_q,
             q_out=inference_q,
             profile=profile,
+        )
+
+        model_metadata = self.client.get_model_metadata(model_name)
+        paths = {}
+        for input in model_metadata.input:
+            channels = 1 if len(input.dims) < 3 else input.dims[1]
+            q_in = mp.Queue(qsize)
+            if isinstance(preprocessing_fn, dict):
+                try:
+                    preproc_fn = preprocessing_fn[input.name]
+                except KeyError:
+                    raise ValueError(
+                        "No input for preprocessing fn {}".format(input.name)
+                    )
+                preproc_fn_kwargs = preprocessing_fn_kwargs.get(input.name, None)
+            else:
+                preproc_fn = preprocessing_fn
+                preproc_fn_kwargs = preprocessing_fn_kwargs
+
+            paths[input.name] = Path(
+                channels=channels,
+                q=q_in,
+                processing_fn=preproc_fn,
+                processing_fn_kwargs=preproc_fn_kwargs,
+            )
+
+        self.preprocessor = Preprocessor(
+            paths=paths,
+            batch_size=batch_size,
+            kernel_size=kernel_size,
+            kernel_stride=kernel_stride,
+            fs=fs,
+            q_out=preprocess_q,
         )
 
         self.postprocessor = Postprocessor(
@@ -71,8 +95,21 @@ class Pipeline:
     def buffers(self):
         return [self.preprocessor, self.client, self.postprocessor]
 
+    @property
+    def input_data_qs(self):
+        return [path.q for path in self.preprocessor.paths]
+
     def get(self):
-        return self.postprocessor.q_out.get()
+        x = self.postprocessor.q_out.get()
+        if isinstance(x, Exception):
+            for buff in self.buffers:
+                if not buff.stopped:
+                    buff.stop()
+            for p in self.processes:
+                if p.is_alive():
+                    p.join()
+            raise x
+        return x
 
     def put(self, x, timeout=None):
         self.preprocessor.q_in.put(x, timeout=timeout)

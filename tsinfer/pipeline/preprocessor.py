@@ -1,10 +1,11 @@
 import queue
 import time
+import typing
 from functools import partial
 
 import numpy as np
 
-from tsinfer.pipeline.common import StoppableIteratingBuffer
+from tsinfer.pipeline.common import Path, StoppableIteratingBuffer
 
 
 class Preprocessor(StoppableIteratingBuffer):
@@ -12,26 +13,33 @@ class Preprocessor(StoppableIteratingBuffer):
 
     def __init__(
         self,
-        batch_size,
-        channels,
-        kernel_size,
-        kernel_stride,
-        fs,
-        preprocessing_fn=None,
-        preprocessing_fn_kwargs=None,
-        **kwargs
+        paths: typing.Union[Path, typing.Dict[str, Path]],
+        batch_size: int,
+        kernel_size: float,
+        kernel_stride: float,
+        fs: float,
+        q_out: queue.Queue,
     ):
-        self.channels = sorted(channels)
-        self._preprocessing_fn = preprocessing_fn
-        preprocessing_fn_kwargs = preprocessing_fn_kwargs or {}
+        self.paths = paths
+        if isinstance(paths, dict):
+            q_in = {name: path.q for name, path in paths.items()}
+            init_kwargs = {
+                name: path.processing_fn_kwargs for name, path in paths.items()
+            }
+        elif isinstance(paths, Path):
+            q_in = paths.q
+            init_kwargs = paths.processing_fn_kwargs
+        else:
+            raise TypeError
+
         self.initialize(
             batch_size=batch_size,
             kernel_size=kernel_size,
             kernel_stride=kernel_stride,
             fs=fs,
-            **preprocessing_fn_kwargs
+            **init_kwargs
         )
-        super().__init__(**kwargs)
+        super().__init__(q_in=q_in, q_out=q_out)
 
     def initialize(self, batch_size, kernel_size, kernel_stride, fs, **kwargs):
         # define sizes for everything
@@ -44,24 +52,45 @@ class Preprocessor(StoppableIteratingBuffer):
         batch_overlap = num_samples_total - num_samples_update
 
         # initialize arrays up front
-        dtype = np.float32
-        # _data holds the single time series that gets windowed into
-        # our batch
-        self._data = np.empty(
-            (len(self.channels), num_samples_total), dtype=dtype
-        )
-        # _extension holds the empty array used to extend _data at
-        # each iteration
-        self._extension = np.empty(
-            (len(self.channels), num_samples_update), dtype=dtype
-        )
-        # _batch holds the windowed version of _data
-        self._batch = np.empty(
-            (batch_size, len(self.channels), num_samples_frame), dtype=dtype
-        )
-        # _target holds the single time series corresponding to the
-        # target channel
-        self._target = np.empty((num_samples_total,), dtype=dtype)
+        dtype = np.float32  # TODO: make path attr?
+
+        if isinstance(self.paths, Path):
+            paths = {None: self.paths}
+        else:
+            paths = self.paths
+
+        self._data = {}
+        self._extension = {}
+        self._batch = {}
+        self._preprocessing_fns = {}
+        for name, path in paths.items():
+            try:
+                num_channels = len(path.channels)
+            except TypeError:
+                num_channels = path.channels
+
+            # _data holds the single time series that gets
+            # windowed into our batch
+            self._data[name] = np.empty(
+                (num_channels, num_samples_total), dtype=dtype
+            )
+            # _extension holds the empty array used to extend _data at
+            # each iteration
+            self._extension[name] = np.empty(
+                (num_channels, num_samples_update), dtype=dtype
+            )
+            # _batch holds the windowed version of _data
+            self._batch[name] = np.empty(
+                (batch_size, num_channels, num_samples_frame), dtype=dtype
+            )
+            if path.processing_fn is not None:
+                if name is None:
+                    fn_kwargs = kwargs
+                else:
+                    fn_kwargs = kwargs[name] or {}
+                self._preprocessing_fns[name] = partial(
+                    path.processing_fn, **fn_kwargs
+                )
 
         # save this since we can get everything we need
         # from this and the first dimension of _data
@@ -77,9 +106,6 @@ class Preprocessor(StoppableIteratingBuffer):
 
         self.secs_per_sample = 1.0 / fs
         self._last_sample_time = None
-
-        if self._preprocessing_fn is not None:
-            self.preprocessing_fn = partial(self._preprocessing_fn, **kwargs)
 
         self.params = {
             "batch_size": batch_size,
