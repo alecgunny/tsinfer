@@ -28,7 +28,7 @@ class Preprocessor(StoppableIteratingBuffer):
             }
         elif isinstance(paths, Path):
             q_in = paths.q
-            init_kwargs = paths.processing_fn_kwargs
+            init_kwargs = paths.processing_fn_kwargs or {}
         else:
             raise TypeError
 
@@ -81,7 +81,7 @@ class Preprocessor(StoppableIteratingBuffer):
 
             # _extension holds the empty array used to extend _data at
             # each iteration
-            self._extension[name] = np.empty(
+            self._extensions[name] = np.empty(
                 (num_channels, num_samples_update), dtype=dtype
             )
 
@@ -96,7 +96,9 @@ class Preprocessor(StoppableIteratingBuffer):
 
         # save this since we can get everything we need
         # from this and the first dimension of _data
-        self.batch_overlap = batch_overlap
+        self._num_samples_total = num_samples_total
+        self._num_samples_frame = num_samples_frame
+        self._batch_overlap = batch_overlap
 
         # tells us how to window a 2D stream of data into a 3D batch
         slices = []
@@ -117,11 +119,20 @@ class Preprocessor(StoppableIteratingBuffer):
         }
         self.params.update(kwargs)
 
+    def read_data_sources(self):
+        while True:
+            try:
+                return super().get_data()
+                break
+            except queue.Empty as e:
+                if self.paused or self.stopped:
+                    raise e
+
     def initialize_loop(self):
-        for i in range(self.batch_overlap):
-            packages = self.read_sensor()
-            for name, package in packages.items():
-                self._data[name][:, i] = package.x
+        for i in range(self._batch_overlap):
+            packages = self.read_data_sources()
+            for name, x in packages.items():
+                self._data[name][:, i] = x
 
     def maybe_wait(self):
         """
@@ -144,23 +155,17 @@ class Preprocessor(StoppableIteratingBuffer):
 
         # start by reading the next batch of samples
         # TODO: add named channel support
-        for i in range(self.batch_overlap, self._data.shape[1]):
-            while True:
-                try:
-                    packages = super().get_data()
-                    break
-                except queue.Empty as e:
-                    if self.paused or self.stopped:
-                        raise e
+        for i in range(self._batch_overlap, self._num_samples_total):
+            packages = self.read_data_sources()
             # self.maybe_wait()
 
-            for name, package in packages.items():
-                self._data[name][:, i] = package.x
+            for name, x in packages.items():
+                self._data[name][:, i] = x
 
             # measure the time the batch was created for profiling
             # purposes. Again, not necessary for a production
             # deployment
-            if i == self._batch.shape[2]:
+            if i == self._num_samples_frame:
                 batch_start_time = time.time()
 
         packages = {
@@ -190,7 +195,7 @@ class Preprocessor(StoppableIteratingBuffer):
         take windows of data at strided intervals and stack them
         """
         for i, slc in enumerate(self.slices):
-            self._batch[name][i] = data[name][:, slc]
+            self._batch[name][i] = data[:, slc]
         # doing a return here in case we decide
         # we need to do a copy, which I think we do
         return self._batch[name]
@@ -202,7 +207,9 @@ class Preprocessor(StoppableIteratingBuffer):
         ones to be filled out by data generator
         """
         self._data[name] = np.append(
-            self._data[name][:, -self.batch_overlap :], self._extension, axis=1
+            self._data[name][:, -self._batch_overlap :],
+            self._extensions[name],
+            axis=1,
         )
 
     def run(self, packages):

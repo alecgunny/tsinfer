@@ -1,15 +1,17 @@
+import multiprocessing as mp
 import os
 import re
 import time
 import typing
 from itertools import cycle
 
+import attr
 import numpy as np
 
 from tsinfer.pipeline.common import StoppableIteratingBuffer
 
-if typing.TYPE_CHECKING:
-    import multiprocessing as mp
+# if typing.TYPE_CHECKING:
+#     import multiprocessing as mp
 
 
 __all__ = [
@@ -21,15 +23,32 @@ __all__ = [
 
 
 class DataGeneratorBuffer(StoppableIteratingBuffer):
-    def __init__(self, data_generator, q_out):
-        self.data_generator = iter(data_generator)
+    def __init__(self, gen_fn, idx_range, q_out):
+        self.idx = 0
+        self.idx_range = idx_range
+        self.gen_fn = gen_fn
         super().__init__(q_out=q_out)
 
     def get_data(self):
-        return next(self.data_generator)
+        try:
+            return self.gen_fn(self.idx)
+        except IndexError:
+            self.idx = 0
+            return self.gen_fn(self.idx)
 
     def run(self, packages):
         self.put(packages)
+        self.idx += 1
+        if self.idx == self.idx_range:
+            self.idx = 0
+
+
+@attr.s(auto_attribs=True)
+class DummyDataGeneratorFn:
+    num_channels: int
+
+    def __call__(self, idx):
+        return np.random.randn(self.num_channels).astype(np.float32)
 
 
 class DummyDataGenerator(DataGeneratorBuffer):
@@ -37,12 +56,15 @@ class DummyDataGenerator(DataGeneratorBuffer):
         self, chanslist: typing.Union[typing.List[str], int], q_out: mp.Queue
     ):
         num_channels = _get_num_channels(chanslist)
+        super().__init__(DummyDataGeneratorFn(num_channels), 1, q_out)
 
-        def data_generator():
-            while True:
-                yield np.random.randn(num_channels).astype(np.float32)
 
-        super().__init__(data_generator(), q_out)
+@attr.s(auto_attribs=True)
+class GwpyTimeSeriesDataGeneratorFn:
+    data: np.ndarray
+
+    def __call__(self, idx):
+        return self.data[:, idx]
 
 
 class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
@@ -65,12 +87,41 @@ class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
         )
         data.resample(fs)
         data = np.stack([data[channel].value for channel in chanslist])
+        gen_fn = GwpyTimeSeriesDataGeneratorFn(data)
+        super().__init__(gen_fn, int(fs * duration), q_out=q_out)
 
-        def data_generator():
-            for idx in cycle(range(int(fs * duration))):
-                yield data[:, idx]
 
-        super().__init__(data_generator(), q_out=q_out)
+@attr.s(auto_attribs=True)
+class LowLatencyFrameDataGeneratorFn:
+    path_pattern: str
+    t0: int
+    fs: float
+    chanslist: typing.List[str]
+    read_fn: typing.Callable
+
+    def __attrs_post_init__(self):
+        self.data = None
+
+    def __call__(self, idx):
+        if idx == int(self.fs) or self.data is None:
+            start_time = time.time()
+            while time.time() - start_time < 1:
+                try:
+                    path = self.path_pattern.format(self.t0)
+                    data = self.read_fn(path, self.chanslist)
+                    break
+                except FileNotFoundError:
+                    continue
+            else:
+                raise ValueError(f"Couldn't find next timestep file {path}")
+
+            data.resample(self.fs)
+            self.data = np.stack(
+                [data[channel].value for channel in self.chanslist]
+            )
+            self.t0 += 1
+            raise IndexError
+        return self.data[:, idx]
 
 
 class LowLatencyFrameDataGenerator(DataGeneratorBuffer):
@@ -117,30 +168,14 @@ class LowLatencyFrameDataGenerator(DataGeneratorBuffer):
             timestamps = [int(t.group(0)) for t in timestamps if t is not None]
             t0 = max(timestamps)
 
-        def data_generator(t0):
-            while True:
-                start_time = time.time()
-                while time.time() - start_time < 1:
-                    try:
-                        path = os.path.join(data_dir, file_pattern.format(t0))
-                        data = TimeSeriesDict.read(path, chanslist)
-                        break
-                    except FileNotFoundError:
-                        continue
-                else:
-                    raise FileNotFoundError(
-                        "Couldn't find next timestep file {}".format(path)
-                    )
-                data.resample(fs)
-                data = np.stack([data[channel].value for channel in chanslist])
-
-                # TODO: how does rounding work for non-integer fs?
-                # TODO: pass chunks, accommodate on preproc end
-                for idx in range(int(fs)):
-                    yield data[:, idx]
-                t0 += 1
-
-        super().__init__(data_generator(t0 + 0), q_out=q_out)
+        gen_fn = LowLatencyFrameDataGeneratorFn(
+            os.path.join(data_dir, file_pattern),
+            t0 + 0,
+            fs,
+            chanslist,
+            TimeSeriesDict.read,
+        )
+        super().__init__(gen_fn, int(fs) + 1, q_out=q_out)
 
 
 def _get_num_channels(chanslist):

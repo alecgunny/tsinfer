@@ -5,9 +5,10 @@ import typing
 from abc import abstractmethod
 
 import attr
+import numpy as np
 
-if typing.TYPE_CHECKING:
-    import numpy as np
+# if typing.TYPE_CHECKING:
+#     import numpy as np
 
 
 class StoppableIteratingBuffer:
@@ -138,9 +139,10 @@ class StoppableIteratingBuffer:
             # if they still have nothing then raise an
             # error
             if len(packages) < len(self.q_in):
-                for key in set(self.q_in) - set(packages):
+                missing_packages = set(self.q_in) - set(packages)
+                for key in missing_packages:
                     try:
-                        stuff = self.get(name, timeout=1e-6)
+                        stuff = self.get(name, timeout=1e-3)
                     except queue.Empty:
                         raise RuntimeError(
                             "Process {} not providing any "
@@ -198,7 +200,7 @@ class StoppableIteratingBuffer:
 
 @attr.s(auto_attribs=True)
 class Package:
-    x: np.Array
+    x: np.ndarray
     batch_start_time: typing.Optional[float]
 
 
