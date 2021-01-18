@@ -5,7 +5,7 @@ from functools import partial
 
 import numpy as np
 
-from tsinfer.pipeline.common import Path, StoppableIteratingBuffer
+from tsinfer.pipeline.common import Package, Path, StoppableIteratingBuffer
 
 
 class Preprocessor(StoppableIteratingBuffer):
@@ -119,9 +119,9 @@ class Preprocessor(StoppableIteratingBuffer):
 
     def initialize_loop(self):
         for i in range(self.batch_overlap):
-            x, y = self.read_sensor()
-            self._data[:, i] = x
-            self._target[i] = y
+            packages = self.read_sensor()
+            for name, package in packages.items():
+                self._data[name][:, i] = package.x
 
     def maybe_wait(self):
         """
@@ -138,43 +138,35 @@ class Preprocessor(StoppableIteratingBuffer):
             curr_time = time.time()
         self._last_sample_time = curr_time
 
-    def read_sensor(self):
-        """
-        read individual samples and return an array of size
-        `(len(self.channels), 1)` for hstacking
-        """
-        while True:
-            try:
-                samples, target = self.get(timeout=1e-7)
-                break
-            except queue.Empty as e:
-                if self.paused:
-                    raise e
-
-        # make sure that we don't "peek" ahead at
-        # data that isn't supposed to exist yet
-        # self.maybe_wait()
-
-        samples = [samples[channel] for channel in self.channels]
-        x = np.array(samples, dtype=np.float32)
-        return x, target
-
     def get_data(self):
         if self._last_sample_time is None:
             self.initialize_loop()
 
         # start by reading the next batch of samples
+        # TODO: add named channel support
         for i in range(self.batch_overlap, self._data.shape[1]):
-            x, y = self.read_sensor()
-            self._data[:, i] = x
-            self._target[i] = y
+            while True:
+                try:
+                    packages = super().get_data()
+                    break
+                except queue.Empty as e:
+                    if self.paused or self.stopped:
+                        raise e
+            # self.maybe_wait()
+
+            for name, package in packages.items():
+                self._data[name][:, i] = package.x
 
             # measure the time the batch was created for profiling
             # purposes. Again, not necessary for a production
             # deployment
             if i == self._batch.shape[2]:
                 batch_start_time = time.time()
-        return self._data, self._target, batch_start_time
+
+        packages = {
+            name: Package(x, batch_start_time) for name, x in self._data.items()
+        }
+        return packages
 
     @StoppableIteratingBuffer.profile
     def preprocess(self, x, name=None):

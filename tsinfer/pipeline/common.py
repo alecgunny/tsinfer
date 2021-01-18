@@ -162,7 +162,7 @@ class StoppableIteratingBuffer:
             self.stop()
             raise queue.Empty
 
-        return {name: Package(*stuff) for name, stuff in packages.items()}
+        return packages  # {name: Package(*stuff) for name, stuff in packages.items()}
 
     @abstractmethod
     def run(self, x, batch_start_time, name=None):
@@ -199,7 +199,7 @@ class StoppableIteratingBuffer:
 @attr.s(auto_attribs=True)
 class Package:
     x: np.Array
-    batch_start_time: float
+    batch_start_time: typing.Optional[float]
 
 
 @attr.s(auto_attribs=True)

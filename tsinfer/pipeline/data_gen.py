@@ -1,11 +1,16 @@
 import os
 import re
 import time
+import typing
 from itertools import cycle
 
 import numpy as np
 
 from tsinfer.pipeline.common import StoppableIteratingBuffer
+
+if typing.TYPE_CHECKING:
+    import multiprocessing as mp
+
 
 __all__ = [
     "DataGeneratorBuffer",
@@ -16,37 +21,40 @@ __all__ = [
 
 
 class DataGeneratorBuffer(StoppableIteratingBuffer):
-    def __init__(self, data_generator, **kwargs):
+    def __init__(self, data_generator, q_out):
         self.data_generator = iter(data_generator)
-        super().__init__(**kwargs)
+        super().__init__(q_out=q_out)
 
     def get_data(self):
-        samples, target = next(self.data_generator)
-        return samples, target, None
+        return next(self.data_generator)
 
-    def run(self, x, y, batch_start_time=None):
-        self.put((x, y))
+    def run(self, packages):
+        self.put(packages)
 
 
 class DummyDataGenerator(DataGeneratorBuffer):
-    def __init__(self, chanslist, **kwargs):
+    def __init__(
+        self, chanslist: typing.Union[typing.List[str], int], q_out: mp.Queue
+    ):
+        num_channels = _get_num_channels(chanslist)
+
         def data_generator():
             while True:
-                data = np.random.randn(len(chanslist)).astype(np.float32)
-                samples = {channel: x for channel, x in zip(chanslist, data)}
-                target = np.float32(np.random.randn())
-                yield samples, target
+                yield np.random.randn(num_channels).astype(np.float32)
 
-        super().__init__(data_generator(), **kwargs)
+        super().__init__(data_generator(), q_out)
 
 
 class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
-    def __init__(self, chanslist, t0, duration, fs, target_channel=0, **kwargs):
-        target_channel, chanslist = _validate_target_channel(
-            target_channel, chanslist
-        )
+    def __init__(
+        self,
+        chanslist: typing.List[str],
+        t0: float,
+        duration: float,
+        fs: float,
+        q_out: mp.Queue,
+    ):
         TimeSeriesDict = _import_gwpy()
-
         data = TimeSeriesDict.get(
             chanslist,
             t0,
@@ -56,35 +64,25 @@ class GwpyTimeSeriesDataGenerator(DataGeneratorBuffer):
             verbose="DOWNLOAD",
         )
         data.resample(fs)
-
-        target = data.pop(target_channel).value
-        channels = list(data.keys())
-        data = np.stack([data[channel].value for channel in channels])
+        data = np.stack([data[channel].value for channel in chanslist])
 
         def data_generator():
             for idx in cycle(range(int(fs * duration))):
-                samples = {
-                    channel: x for channel, x in zip(channels, data[:, idx])
-                }
-                yield samples, target[idx]
+                yield data[:, idx]
 
-        super().__init__(data_generator(), **kwargs)
+        super().__init__(data_generator(), q_out=q_out)
 
 
 class LowLatencyFrameDataGenerator(DataGeneratorBuffer):
     def __init__(
         self,
-        data_dir,
-        chanslist,
-        fs,
-        t0=None,
-        file_pattern=None,
-        target_channel=0,
-        **kwargs,
+        data_dir: str,
+        chanslist: typing.List[str],
+        fs: float,
+        q_out: mp.Queue,
+        t0: typing.Optional[int] = None,
+        file_pattern: typing.Optional[str] = None,
     ):
-        target_channel, chanslist = _validate_target_channel(
-            target_channel, chanslist
-        )
         TimeSeriesDict = _import_gwpy()
 
         if file_pattern is None and t0 is None:
@@ -118,7 +116,6 @@ class LowLatencyFrameDataGenerator(DataGeneratorBuffer):
                 )
             timestamps = [int(t.group(0)) for t in timestamps if t is not None]
             t0 = max(timestamps)
-        self.t0 = t0
 
         def data_generator(t0):
             while True:
@@ -135,32 +132,24 @@ class LowLatencyFrameDataGenerator(DataGeneratorBuffer):
                         "Couldn't find next timestep file {}".format(path)
                     )
                 data.resample(fs)
+                data = np.stack([data[channel].value for channel in chanslist])
 
-                target = data.pop(target_channel).value
-                channels = list(data.keys())
-                data = np.stack([data[channel].value for channel in channels])
-
-                # TODO: how does rounding work for non-integer fs
+                # TODO: how does rounding work for non-integer fs?
                 # TODO: pass chunks, accommodate on preproc end
                 for idx in range(int(fs)):
-                    samples = {
-                        channel: x for channel, x in zip(channels, data[:, idx])
-                    }
-                    yield samples, target[idx]
+                    yield data[:, idx]
                 t0 += 1
 
-        super().__init__(data_generator(t0 + 0), **kwargs)
+        super().__init__(data_generator(t0 + 0), q_out=q_out)
 
 
-def _validate_target_channel(target_channel, chanslist):
-    if isinstance(target_channel, str):
-        if target_channel not in chanslist:
-            chanslist = chanslist + [target_channel]
-    elif isinstance(target_channel, int):
-        target_channel = chanslist[target_channel]
-    else:
-        raise ValueError
-    return target_channel, chanslist
+def _get_num_channels(chanslist):
+    try:
+        return len(chanslist)
+    except TypeError:
+        if not isinstance(chanslist, int):
+            raise TypeError("chanslist was type {}".format(type(chanslist)))
+        return chanslist
 
 
 def _import_gwpy():
