@@ -19,6 +19,7 @@ class Preprocessor(StoppableIteratingBuffer):
         kernel_stride: float,
         fs: float,
         q_out: queue.Queue,
+        profile: bool=False
     ):
         self.paths = paths
         if isinstance(paths, dict):
@@ -39,7 +40,7 @@ class Preprocessor(StoppableIteratingBuffer):
             fs=fs,
             **init_kwargs
         )
-        super().__init__(q_in=q_in, q_out=q_out)
+        super().__init__(q_in=q_in, q_out=q_out, profile=profile)
 
     def initialize(self, batch_size, kernel_size, kernel_stride, fs, **kwargs):
         # define sizes for everything

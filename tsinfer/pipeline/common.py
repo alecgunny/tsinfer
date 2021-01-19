@@ -189,7 +189,7 @@ class StoppableIteratingBuffer:
 
                 name = f.__name__
                 if kwargs.get("name") is not None:
-                    name += "." + kwargs[name]
+                    name += "." + kwargs["name"]
                 self.profile_q.put((name, end_time - start_time))
             else:
                 stuff = f(self, *args, **kwargs)

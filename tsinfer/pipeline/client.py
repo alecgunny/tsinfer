@@ -3,7 +3,7 @@ import string
 import time
 from functools import partial
 
-import tritongrpcclient as triton
+from tritonclient import grpc as triton
 
 from tsinfer.pipeline.common import Package, StoppableIteratingBuffer
 
@@ -65,7 +65,7 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
 
         self.inputs = {}
         for input in model_metadata.inputs:
-            self.client_inputs[input.name] = triton.InferInput(
+            self.inputs[input.name] = triton.InferInput(
                 input.name, tuple(input.shape), input.datatype
             )
         self.outputs = [
@@ -103,6 +103,8 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             self.profile_q.put((step, avg_time))
 
     def run(self, package):
+        # TODO: this is a hack around a bug, figure this out
+        package = package[None]
         callback = partial(
             self.process_result, batch_start_time=package.batch_start_time
         )
@@ -147,7 +149,7 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
     def process_result(self, batch_start_time, result, error):
         # TODO: add error checking
         x = {}
-        for output in self.ouptuts:
+        for output in self.outputs:
             name = output.name()
             x[name] = result.as_numpy(name)
         package = Package(x, batch_start_time)
