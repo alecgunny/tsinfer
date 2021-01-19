@@ -167,7 +167,7 @@ class StoppableIteratingBuffer:
         return packages  # {name: Package(*stuff) for name, stuff in packages.items()}
 
     @abstractmethod
-    def run(self, x, batch_start_time, name=None):
+    def run(self, package):
         """
         required to have this method for main funcionality
         """
@@ -200,8 +200,8 @@ class StoppableIteratingBuffer:
 
 @attr.s(auto_attribs=True)
 class Package:
-    x: np.ndarray
-    batch_start_time: typing.Optional[float]
+    x: typing.Dict[str, np.ndarray]
+    batch_start_time: float
 
 
 @attr.s(auto_attribs=True)

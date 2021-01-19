@@ -5,7 +5,7 @@ from functools import partial
 
 import tritongrpcclient as triton
 
-from tsinfer.pipeline.common import StoppableIteratingBuffer
+from tsinfer.pipeline.common import Package, StoppableIteratingBuffer
 
 
 class AsyncInferenceClient(StoppableIteratingBuffer):
@@ -63,14 +63,15 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
         # load specific version
         # assert model_metadata.versions[0] == model_version
 
-        model_input = model_metadata.inputs[0]
-        data_type = model_input.datatype
-        model_output = model_metadata.outputs[0]
-
-        self.client_input = triton.InferInput(
-            model_input.name, tuple(model_input.shape), data_type
-        )
-        self.client_output = triton.InferRequestedOutput(model_output.name)
+        self.inputs = {}
+        for input in model_metadata.inputs:
+            self.client_inputs[input.name] = triton.InferInput(
+                input.name, tuple(input.shape), input.datatype
+            )
+        self.outputs = [
+            triton.InferRequestedOutput(output.name)
+            for output in model_metadata.outputs
+        ]
 
         self.params = {
             "model_name": model_name,
@@ -101,9 +102,9 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             avg_time = getattr(inference_stats, step).ns / (10 ** 9 * count)
             self.profile_q.put((step, avg_time))
 
-    def run(self, x, y, batch_start_time):
+    def run(self, package):
         callback = partial(
-            self.process_result, target=y, batch_start_time=batch_start_time
+            self.process_result, batch_start_time=package.batch_start_time
         )
 
         request_id = "".join(random.choices(string.ascii_letters, k=16))
@@ -111,12 +112,30 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             start_time = time.time()
             self._in_flight_requests[request_id] = start_time
 
-        self.client_input.set_data_from_numpy(x.astype("float32"))
+        if len(package.x) != len(self.inputs):
+            raise ValueError(
+                "Received {} inputs but expected {}".format(
+                    len(package.x), len(self.inputs)
+                )
+            )
+        if len(package.x) == 1 and None in package.x:
+            package.x[list(self.inputs.keys())[0]] = package.x.pop(None)
+        if set(package.x) != set(self.inputs):
+            raise ValueError(
+                "Expected inputs {}, received inputs {}".format(
+                    ", ".join(set(package.x)), ", ".join(set(self.inputs))
+                )
+            )
+
+        for name, x in package.x.items():
+            # TODO: better dynamic casting
+            self.inputs[name].set_data_from_numpy(x.astype("float32"))
+
         self.client.async_infer(
             model_name=self.params["model_name"],
             model_version=self.params["model_version"],
-            inputs=[self.client_input],
-            outputs=[self.client_output],
+            inputs=list(self.inputs.values()),
+            outputs=self.outputs,
             request_id=request_id,
             callback=callback,
         )
@@ -125,10 +144,14 @@ class AsyncInferenceClient(StoppableIteratingBuffer):
             stats = self.pull_stats()
             self.update_profiles(stats)
 
-    def process_result(self, target, batch_start_time, result, error):
+    def process_result(self, batch_start_time, result, error):
         # TODO: add error checking
-        prediction = result.as_numpy(self.client_output.name())
-        self.put((prediction, target, batch_start_time))
+        x = {}
+        for output in self.ouptuts:
+            name = output.name()
+            x[name] = result.as_numpy(name)
+        package = Package(x, batch_start_time)
+        self.put(package)
 
         if self.profile:
             end_time = time.time()

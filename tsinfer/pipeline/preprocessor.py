@@ -168,10 +168,7 @@ class Preprocessor(StoppableIteratingBuffer):
             if i == self._num_samples_frame:
                 batch_start_time = time.time()
 
-        packages = {
-            name: Package(x, batch_start_time) for name, x in self._data.items()
-        }
-        return packages
+        return Package(self._data, batch_start_time)
 
     @StoppableIteratingBuffer.profile
     def preprocess(self, x, name=None):
@@ -201,28 +198,26 @@ class Preprocessor(StoppableIteratingBuffer):
         return self._batch[name]
 
     @StoppableIteratingBuffer.profile
-    def reset(self, name=None):
+    def reset(self):
         """
         remove stale data elements and replace with empty
         ones to be filled out by data generator
         """
-        self._data[name] = np.append(
-            self._data[name][:, -self._batch_overlap :],
-            self._extensions[name],
-            axis=1,
-        )
+        for name in self._data:
+            self._data[name] = np.append(
+                self._data[name][:, -self._batch_overlap :],
+                self._extensions[name],
+                axis=1,
+            )
 
-    def run(self, packages):
+    def run(self, package):
         # TODO: thread this?
-        put_obj = {}
-        for name, package in packages.items():
-            x = self.preprocess(package.x, name=name)
-            x = self.make_batch(package.x, name=name)
-            put_obj[name] = (x, package.batch_start_time)
+        batch_x = {}
+        for name, x in package.x.items():
+            x = self.preprocess(x, name=name)
+            x = self.make_batch(x, name=name)
+            batch_x[name] = x
 
-        if set(put_obj) == set([None]):
-            put_obj = put_obj.pop(None)
-        self.put(put_obj)
-
-        for name in packages:
-            self.reset(name)
+        package.x = batch_x
+        self.put(package)
+        self.reset()
