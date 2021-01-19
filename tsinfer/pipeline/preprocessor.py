@@ -19,7 +19,7 @@ class Preprocessor(StoppableIteratingBuffer):
         kernel_stride: float,
         fs: float,
         q_out: queue.Queue,
-        profile: bool=False
+        profile: bool = False,
     ):
         self.paths = paths
         if isinstance(paths, dict):
