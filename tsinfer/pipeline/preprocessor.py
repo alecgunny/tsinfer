@@ -1,9 +1,10 @@
 import queue
 import time
 import typing
+from functools import partial
+from multiprocessing import Queue
 
 import numpy as np
-from multiiprocessing import Queue
 from tritonclient import grpc as triton
 
 from tsinfer.pipeline.common import Package, StoppableIteratingBuffer
@@ -21,7 +22,9 @@ class Preprocessor(StoppableIteratingBuffer):
         kernel_size: float,
         kernel_stride: float,
         fs: float,
-        q_out: queue.Queue,
+        postprocessor: typing.Callable,
+        q_out: Queue,
+        qsize: int = 100,
         profile: bool = False,
     ):
         # set up server connection and check that server is active
@@ -38,7 +41,8 @@ class Preprocessor(StoppableIteratingBuffer):
             kernel_stride,
             fs,  # TODO: we can get this from model
         )
-        q_in = {name: Queue(1000) for name in self.inputs}
+        q_in = {name: Queue(qsize) for name in self.inputs}
+        self.postprocessor = postprocessor
         super().__init__(q_in=q_in, q_out=q_out, profile=profile)
 
     def initialize(
@@ -51,8 +55,8 @@ class Preprocessor(StoppableIteratingBuffer):
         fs,
     ):
         # first unload existing model
-        if model_name != self.params["model_name"]:
-            self.client.unload_model(model_name)
+        # if model_name != self.params["model_name"]:
+        #     self.client.unload_model(model_name)
 
         # verify that model is ready
         if not self.client.is_model_ready(model_name):
@@ -96,6 +100,14 @@ class Preprocessor(StoppableIteratingBuffer):
         ]
 
         self._initialize_tensors(batch_size, kernel_size, kernel_stride, fs)
+        self.params = {
+            "model_name": model_name,
+            "model_version": model_version,
+            "batch_size": batch_size,
+            "kernel_size": kernel_size,
+            "kernel_stride": kernel_stride,
+            "fs": fs
+        }
 
     def _initialize_tensors(
         self, batch_size, kernel_size, kernel_stride, fs, **kwargs
@@ -148,14 +160,6 @@ class Preprocessor(StoppableIteratingBuffer):
         self.secs_per_sample = 1.0 / fs
         self._last_sample_time = None
 
-        self.params = {
-            "batch_size": batch_size,
-            "kernel_size": kernel_size,
-            "kernel_stride": kernel_stride,
-            "fs": fs,
-        }
-        self.params.update(kwargs)
-
     def read_data_sources(self):
         while True:
             try:
@@ -170,6 +174,8 @@ class Preprocessor(StoppableIteratingBuffer):
             packages = self.read_data_sources()
             for name, x in packages.items():
                 self._data[name][:, i] = x
+        self._start_time = time.time()
+        self._inferences = 0
 
     def maybe_wait(self):
         """
@@ -230,9 +236,9 @@ class Preprocessor(StoppableIteratingBuffer):
         """
         for i, slc in enumerate(self.slices):
             self._batch[name][i] = data[:, slc]
-        # doing a return here in case we decide
-        # we need to do a copy, which I think we do
-        return self._batch[name]
+        self.inputs[name].set_data_from_numpy(
+            self._batch[name].astype("float32")
+        )
 
     @StoppableIteratingBuffer.profile
     def reset(self):
@@ -241,28 +247,29 @@ class Preprocessor(StoppableIteratingBuffer):
         ones to be filled out by data generator
         """
         for name in self._data:
-            self._data[name] = np.append(
-                self._data[name][:, -self._batch_overlap :],
-                self._extensions[name],
-                axis=1,
-            )
+            self._data[name][:-self._batch_overlap] = self._data[name][
+                self._batch_overlap:
+            ]
 
     def run(self, package):
         for name, x in package.x.items():
             x = self.preprocess(x, name=name)
-            x = self.make_batch(x, name=name)
-            self.inputs[name].set_data_from_numpy(x.astype("float32"))
+            self.make_batch(x, name=name)
 
         def callback(result, error):
             end_time = time.time()
-            self.q_out.put(end_time - package.batch_start_time)
+            latency = end_time - package.batch_start_time
+            throughput = (self._inferences+1) / (end_time - self._start_time)
+            self._inferences += 1
+
+            self.put((latency, throughput))
 
         self.client.async_infer(
             model_name=self.params["model_name"],
-            model_version=self.params["model_version"],
+            model_version=str(self.params["model_version"]),
             inputs=list(self.inputs.values()),
             outputs=self.outputs,
             # request_id=request_id,
-            callback=callback,
+            callback=callback
         )
         self.reset()
