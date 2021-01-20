@@ -1,11 +1,12 @@
 import queue
 import time
 import typing
-from functools import partial
 
 import numpy as np
+from multiiprocessing import Queue
+from tritonclient import grpc as triton
 
-from tsinfer.pipeline.common import Package, Path, StoppableIteratingBuffer
+from tsinfer.pipeline.common import Package, StoppableIteratingBuffer
 
 
 class Preprocessor(StoppableIteratingBuffer):
@@ -13,7 +14,9 @@ class Preprocessor(StoppableIteratingBuffer):
 
     def __init__(
         self,
-        paths: typing.Union[Path, typing.Dict[str, Path]],
+        url: str,
+        model_name: str,
+        model_version: int,
         batch_size: int,
         kernel_size: float,
         kernel_stride: float,
@@ -21,28 +24,82 @@ class Preprocessor(StoppableIteratingBuffer):
         q_out: queue.Queue,
         profile: bool = False,
     ):
-        self.paths = paths
-        if isinstance(paths, dict):
-            q_in = {name: path.q for name, path in paths.items()}
-            init_kwargs = {
-                name: path.processing_fn_kwargs for name, path in paths.items()
-            }
-        elif isinstance(paths, Path):
-            q_in = paths.q
-            init_kwargs = paths.processing_fn_kwargs or {}
-        else:
-            raise TypeError
+        # set up server connection and check that server is active
+        client = triton.InferenceServerClient(url)
+        if not client.is_server_live():
+            raise RuntimeError("Server not live")
+        self.client = client
 
         self.initialize(
-            batch_size=batch_size,
-            kernel_size=kernel_size,
-            kernel_stride=kernel_stride,
-            fs=fs,
-            **init_kwargs
+            model_name,
+            model_version,
+            batch_size,  # TODO: we can get this from model
+            kernel_size,
+            kernel_stride,
+            fs,  # TODO: we can get this from model
         )
+        q_in = {name: Queue(1000) for name in self.inputs}
         super().__init__(q_in=q_in, q_out=q_out, profile=profile)
 
-    def initialize(self, batch_size, kernel_size, kernel_stride, fs, **kwargs):
+    def initialize(
+        self,
+        model_name,
+        model_version,
+        batch_size,
+        kernel_size,
+        kernel_stride,
+        fs,
+    ):
+        # first unload existing model
+        if model_name != self.params["model_name"]:
+            self.client.unload_model(model_name)
+
+        # verify that model is ready
+        if not self.client.is_model_ready(model_name):
+            # if not, try to load use model control API
+            try:
+                self.client.load_model(model_name)
+
+            # if we can't load the model, first check if the given
+            # name is even valid. If it is, throw our hands up
+            except triton.InferenceServerException:
+                models = self.client.get_model_repository_index().models
+                model_names = [model.name for model in models]
+                if model_name not in model_names:
+                    raise ValueError(
+                        "Model name {} not one of available models: {}".format(
+                            model_name, ", ".join(model_names)
+                        )
+                    )
+                else:
+                    raise RuntimeError(
+                        "Couldn't load model {} for unknown reason".format(
+                            model_name
+                        )
+                    )
+            # double check that load worked
+            assert self.client.is_model_ready(model_name)
+
+        model_metadata = self.client.get_model_metadata(model_name)
+        # TODO: find better way to check version, or even to
+        # load specific version
+        # assert model_metadata.versions[0] == model_version
+
+        self.inputs = {}
+        for input in model_metadata.inputs:
+            self.inputs[input.name] = triton.InferInput(
+                input.name, tuple(input.shape), input.datatype
+            )
+        self.outputs = [
+            triton.InferRequestedOutput(output.name)
+            for output in model_metadata.outputs
+        ]
+
+        self._initialize_tensors(batch_size, kernel_size, kernel_stride, fs)
+
+    def _initialize_tensors(
+        self, batch_size, kernel_size, kernel_stride, fs, **kwargs
+    ):
         # define sizes for everything
         num_samples_frame = int(kernel_size * fs)
         num_samples_stride = int(kernel_stride * fs)
@@ -55,20 +112,14 @@ class Preprocessor(StoppableIteratingBuffer):
         # initialize arrays up front
         dtype = np.float32  # TODO: make path attr?
 
-        if isinstance(self.paths, Path):
-            paths = {None: self.paths}
-        else:
-            paths = self.paths
-
         self._data = {}
         self._batch = {}
-        self._extensions = {}
         self._preprocessing_fns = {}
-        for name, path in paths.items():
-            try:
-                num_channels = len(path.channels)
-            except TypeError:
-                num_channels = path.channels
+        for name, input in self.inputs.items():
+            if len(input.shape()) == 2:
+                num_channels = 1
+            else:
+                num_channels = input.shape()[1]
 
             # _data holds the single time series that gets
             # windowed into our batch
@@ -79,21 +130,6 @@ class Preprocessor(StoppableIteratingBuffer):
             self._batch[name] = np.empty(
                 (batch_size, num_channels, num_samples_frame), dtype=dtype
             )
-
-            # _extension holds the empty array used to extend _data at
-            # each iteration
-            self._extensions[name] = np.empty(
-                (num_channels, num_samples_update), dtype=dtype
-            )
-
-            if path.processing_fn is not None:
-                if name is None:
-                    fn_kwargs = kwargs
-                else:
-                    fn_kwargs = kwargs[name] or {}
-                self._preprocessing_fns[name] = partial(
-                    path.processing_fn, **fn_kwargs
-                )
 
         # save this since we can get everything we need
         # from this and the first dimension of _data
@@ -212,13 +248,21 @@ class Preprocessor(StoppableIteratingBuffer):
             )
 
     def run(self, package):
-        # TODO: thread this?
-        batch_x = {}
         for name, x in package.x.items():
             x = self.preprocess(x, name=name)
             x = self.make_batch(x, name=name)
-            batch_x[name] = x
+            self.inputs[name].set_data_from_numpy(x.astype("float32"))
 
-        package.x = batch_x
-        self.put(package)
+        def callback(result, error):
+            end_time = time.time()
+            self.q_out.put(end_time - package.batch_start_time)
+
+        self.client.async_infer(
+            model_name=self.params["model_name"],
+            model_version=self.params["model_version"],
+            inputs=list(self.inputs.values()),
+            outputs=self.outputs,
+            # request_id=request_id,
+            callback=callback,
+        )
         self.reset()
